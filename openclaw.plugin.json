@@ -1,0 +1,16 @@
+{
+    "id": "rocketchat-plugin",
+    "name": "RocketChat Webhook",
+    "version": "0.1.0",
+    "description": "Rocket.Chat integration for OpenClaw",
+    "type": "channel",
+    "channels": [
+        "rocketchat-plugin"
+    ],
+    "configuration": {
+        "channels": [
+            "rocketchat-plugin"
+        ]
+    },
+    "entry": "dist/index.js"
+}
