@@ -1,15 +1,71 @@
 {
-    "id": "rocketchat-plugin",
+    "id": "rocketchat",
     "name": "RocketChat Webhook",
     "version": "0.1.0",
     "description": "Rocket.Chat integration for OpenClaw",
     "type": "channel",
     "channels": [
-        "rocketchat-plugin"
+        "rocketchat"
     ],
+    "configSchema": {
+        "RC_URL": {
+            "type": "string",
+            "description": "Rocket.Chat server URL",
+            "default": "http://localhost:3000"
+        },
+        "RC_AUTH_TOKEN": {
+            "type": "string",
+            "description": "Rocket.Chat bot auth token",
+            "secret": true
+        },
+        "RC_USER_ID": {
+            "type": "string",
+            "description": "Rocket.Chat bot user ID"
+        },
+        "DEFAULT_ROOM": {
+            "type": "string",
+            "description": "Default room ID to send messages to",
+            "default": "GENERAL"
+        },
+        "RC_WEBHOOK_SECRET": {
+            "type": "string",
+            "description": "Secret token to validate incoming webhooks",
+            "secret": true
+        }
+    },
+    "channelConfigs": {
+        "rocketchat": {
+            "schema": {
+                "RC_URL": {
+                    "type": "string",
+                    "description": "Rocket.Chat server URL",
+                    "default": "http://localhost:3000"
+                },
+                "RC_AUTH_TOKEN": {
+                    "type": "string",
+                    "description": "Rocket.Chat bot auth token",
+                    "secret": true
+                },
+                "RC_USER_ID": {
+                    "type": "string",
+                    "description": "Rocket.Chat bot user ID"
+                },
+                "DEFAULT_ROOM": {
+                    "type": "string",
+                    "description": "Default room ID to send messages to",
+                    "default": "GENERAL"
+                },
+                "RC_WEBHOOK_SECRET": {
+                    "type": "string",
+                    "description": "Secret token to validate incoming webhooks",
+                    "secret": true
+                }
+            }
+        }
+    },
     "configuration": {
         "channels": [
-            "rocketchat-plugin"
+            "rocketchat"
         ]
     },
     "entry": "dist/index.js"
