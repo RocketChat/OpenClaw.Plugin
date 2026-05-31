@@ -1,3 +1,6 @@
+import { getConfig } from "./config.js";
+const configvars = getConfig();
+
 export default function register(api: any): void {
     const logger = api.logger || {
         info: (msg: string) => console.log(`[RC] ${msg}`),
@@ -5,14 +8,23 @@ export default function register(api: any): void {
     };
 
     const config = {
-        url: "http://localhost:3000",
-        authToken: "",
-        userId: "",
-        defaultRoom: "",
-        webhookSecret: "",
+        url: configvars.url  || "http://localhost:3000",
+        authToken: configvars.authToken || "",
+        userId: configvars.userId || "",
+        defaultRoom: configvars.defaultRoom || "GENERAL",
+        webhookSecret: configvars.webhookSecret || "",
     };
 
+    if (!config.webhookSecret) {
+       console.warn("[RC Config] Warning: RC_WEBHOOK_SECRET is not set — webhook auth disabled.");
+    }
+
+
     logger.info("Initializing Unified Rocket.Chat Plugin...");
+    logger.info(`[Config] RC_URL:          ${config.url}`);
+    logger.info(`[Config] RC_USER_ID:      ${config.userId || "NOT SET"}`);
+    logger.info(`[Config] RC_AUTH_TOKEN:   ${config.authToken ? config.authToken.slice(0, 6) + "..." : "NOT SET"}`);
+    logger.info(`[Config] DEFAULT_ROOM:    ${config.defaultRoom || "NOT SET"}`);
 
     api.registerChannel({
         plugin: {
@@ -77,80 +89,119 @@ export default function register(api: any): void {
         },
     });
 
-    if (api.registerHttpRoute) {
-        api.registerHttpRoute({
-            method: "POST",
-            path: "/rocketchat/webhook",
-            auth: { mode: "none" },
-            handler: async (req: any, res: any) => {
-                try {
-                    const body = req.body || {};
+   if (api.registerHttpRoute) {
+    api.registerHttpRoute({
+        method: "POST",
+        path: "/rocketchat/webhook",
+        auth: "plugin",
+        handler: async (req: any, res: any) => {
+    try {
+        let body: any = (req.body && Object.keys(req.body).length > 0) ? req.body : null;
+if (!body) {
+    const rawBody = await new Promise<string>((resolve, reject) => {
+        let data = "";
+        req.on("data", (chunk: any) => { data += chunk; });
+        req.on("end", () => resolve(data));
+        req.on("error", reject);
+    });
+    try { body = rawBody ? JSON.parse(rawBody) : {}; } catch { body = {}; }
+}
 
-                    const token = req.headers["x-rocketchat-livechat-token"] || req.headers["authorization"] || body.token;
-                    if (config.webhookSecret && token !== config.webhookSecret) {
-                        logger.error("Webhook authentication failed. Invalid token.");
-                        return res.status(401).json({ error: "Unauthorized" });
-                    }
+        logger.info("[Webhook] Incoming payload received");
+        logger.info(`[Webhook] user_id:      ${body.user_id}`);
+        logger.info(`[Webhook] user_name:    ${body.user_name}`);
+        logger.info(`[Webhook] channel_id:   ${body.channel_id}`);
+        logger.info(`[Webhook] channel_name: ${body.channel_name}`);
+        logger.info(`[Webhook] text:         ${body.text}`);
+        logger.info(`[Webhook] message_id:   ${body.message_id}`);
+        logger.info(`[Webhook] bot:          ${body.bot}`);
+        logger.info(`[Webhook] tmid:         ${body.tmid}`);
 
-                    const text = body.text || "";
-                    const roomId = body.channel_id || "GENERAL";
-                    const senderId = body.user_id || "unknown";
-                    const msgId = body.message_id || Date.now().toString();
-                    const isBot = body.bot === true;
+        // ignore bot self-messages
+        if (body.bot || body.user_id === config.userId) {
+            logger.info("[Webhook] Skipping bot message");
+            res.statusCode = 200;
+            res.end(JSON.stringify({ success: true }));
+            return;
+        }
 
-                    if (isBot || senderId === config.userId) {
-                        return res.status(200).json({ success: true, ignored: true });
-                    }
-
-                    if (api.gateway && api.gateway.dispatchInbound) {
-                        await api.gateway.dispatchInbound({
-                            channel: "rocketchat",
-                            accountId: "default",
-                            type: "message",
-                            message: {
-                                id: msgId,
-                                text: text,
-                                from: senderId,
-                                to: roomId,
-                                metadata: {
-                                    channelName: body.channel_name,
-                                    userName: body.user_name,
-                                    threadId: body.tmid
-                                }
-                            },
-                            raw: body,
-                        });
-                        logger.info(`Dispatched inbound message from ${senderId} in ${roomId}`);
-                    } else {
-                        logger.error("api.gateway.dispatchInbound is not available.");
-                    }
-
-                    res.status(200).json({ success: true });
-                } catch (err) {
-                    logger.error(`Webhook processing error: ${(err as Error).message}`);
-                    res.status(500).json({ error: "Internal Server Error" });
-                }
-            },
+        // dispatch into OpenClaw
+        await api.scheduleSessionTurn({
+            channel: "rocketchat",
+            accountId: "default",
+            to: body.channel_id || config.defaultRoom,
+            from: body.user_name,
+            text: body.text ?? "",
+            threadId: body.tmid ?? null,
+            messageId: body.message_id,
         });
-        logger.info("Registered Inbound Webhook at /rocketchat/webhook");
-    } else {
-        logger.error("api.registerHttpRoute is not available on this OpenClaw version.");
-    }
 
-    if (api.registerCli) {
-        api.registerCli(({ program }: { program: any }) => {
-            const rc = program.command("rocketchat").alias("rc").description("Rocket.Chat unified plugin commands");
-            rc.command("status")
-                .description("Check Rocket.Chat webhook and integration status")
-                .action(() => {
-                    console.log("Rocket.Chat plugin is loaded.");
-                    console.log(`RC_URL: ${config.url}`);
-                    console.log(`Webhook Secret Configured: ${!!config.webhookSecret}`);
-                });
-        }, {
-            commands: ["rocketchat"]
-        });
+
+        // New API per sdk-channel-inbound docs. Use this once scheduleSessionTurn
+                    // is confirmed removed or broken. Replace approach 1 with this block.
+                    //
+                    // await api.runtime.channel.inbound.run({
+                    //     channel: "rocketchat",
+                    //     accountId: "default",
+                    //     raw: body,
+                    //     adapter: {
+                    //         // ingest: normalize the raw RC webhook payload into OpenClaw's
+                    //         // inbound message shape expected by the agent layer.
+                    //         ingest: (raw: any) => ({
+                    //             id: raw.message_id ?? `${Date.now()}`,
+                    //             rawText: raw.text ?? "",
+                    //             textForAgent: raw.text ?? "",
+                    //             textForCommands: raw.text ?? "",
+                    //             from: raw.user_name,
+                    //             to: raw.channel_id || config.defaultRoom,
+                    //             threadId: raw.tmid ?? null,
+                    //             raw,
+                    //         }),
+                    //         // resolveTurn: assemble the full turn context for the agent —
+                    //         // routing, session store path, reply target, and delivery fn.
+                    //         // Signature and required fields TBD from channel-ingress docs:
+                    //         // https://docs.openclaw.ai/plugins/sdk-channel-ingress
+                    //         resolveTurn: (input: any) => {
+                    //             const room = body.channel_id || config.defaultRoom;
+                    //             return {
+                    //                 // TODO: fill once ingress API shape is confirmed
+                    //                 delivery: {
+                    //                     deliver: async (payload: any) => {
+                    //                         const text = payload.text ?? payload.message ?? "";
+                    //                         const sendRes = await fetch(`${config.url}/api/v1/chat.sendMessage`, {
+                    //                             method: "POST",
+                    //                             headers: {
+                    //                                 "Content-Type": "application/json",
+                    //                                 "X-Auth-Token": config.authToken,
+                    //                                 "X-User-Id": config.userId,
+                    //                             },
+                    //                             body: JSON.stringify({ message: { rid: room, msg: text } }),
+                    //                         });
+                    //                         if (!sendRes.ok) {
+                    //                             const errBody = await sendRes.text().catch(() => "");
+                    //                             logger.error(`[Delivery] Failed: ${sendRes.status} ${errBody}`);
+                    //                         }
+                    //                     },
+                    //                 },
+                    //             };
+                    //         },
+                    //     },
+                    // });
+
+
+        logger.info("[Webhook] Dispatched to OpenClaw via scheduleSessionTurn");
+
+        res.statusCode = 200;
+        res.end(JSON.stringify({ success: true }));
+    } catch (err) {
+        logger.error(`[Webhook] Error: ${(err as Error).message}`);
+        res.statusCode = 500;
+        res.end(JSON.stringify({ error: "Internal Server Error" }));
     }
+},
+    });
+    logger.info("Registered Inbound Webhook at /rocketchat/webhook");
+}
 
     logger.info("Rocket.Chat Unified Plugin initialization complete.");
 }
