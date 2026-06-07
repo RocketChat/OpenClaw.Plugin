@@ -1,72 +1,140 @@
 {
-    "id": "rocketchat",
-    "name": "RocketChat Webhook",
-    "version": "0.1.0",
-    "description": "Rocket.Chat integration for OpenClaw",
-    "type": "channel",
-    "channels": [
-        "rocketchat"
-    ],
-    "configSchema": {
-        "RC_URL": {
-            "type": "string",
-            "description": "Rocket.Chat server URL",
-            "default": "http://localhost:3000"
-        },
-        "RC_AUTH_TOKEN": {
-            "type": "string",
-            "description": "Rocket.Chat bot auth token",
-            "secret": true
-        },
-        "RC_USER_ID": {
-            "type": "string",
-            "description": "Rocket.Chat bot user ID"
-        },
-        "DEFAULT_ROOM": {
-            "type": "string",
-            "description": "Default room ID to send messages to",
-            "default": "GENERAL"
-        },
-        "RC_WEBHOOK_SECRET": {
-            "type": "string",
-            "description": "Secret token to validate incoming webhooks",
-            "secret": true
-        }
-    },
-    "channelConfigs": {
-        "rocketchat": {
-            "schema": {
-                "RC_URL": {
-                    "type": "string",
-                    "description": "Rocket.Chat server URL",
-                    "default": "http://localhost:3000"
+  "id": "rocketchat",
+  "name": "Rocket.Chat",
+  "description": "Rocket.Chat channel plugin with REST polling outbound/inbound",
+  "version": "1.0.0",
+  "kind": "channel",
+  "channels": ["rocketchat"],
+  "channelConfigs": {
+    "rocketchat": {
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "accounts": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "serverUrl": { "type": "string", "minLength": 1 },
+                "auth": {
+                  "type": "object",
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "mode": { "const": "token" },
+                        "userId": { "type": "string", "minLength": 1 },
+                        "accessToken": { "type": "string", "minLength": 1 }
+                      },
+                      "required": ["mode", "userId", "accessToken"]
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "mode": { "const": "password" },
+                        "username": { "type": "string", "minLength": 1 },
+                        "password": { "type": "string", "minLength": 1 }
+                      },
+                      "required": ["mode", "username", "password"]
+                    }
+                  ]
                 },
-                "RC_AUTH_TOKEN": {
-                    "type": "string",
-                    "description": "Rocket.Chat bot auth token",
-                    "secret": true
+                "transport": {
+                  "type": "object",
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "mode": { "const": "polling" },
+                        "pollIntervalMs": { "type": "integer", "minimum": 1000 }
+                      },
+                      "required": ["mode"]
+                    }
+                  ]
                 },
-                "RC_USER_ID": {
-                    "type": "string",
-                    "description": "Rocket.Chat bot user ID"
-                },
-                "DEFAULT_ROOM": {
-                    "type": "string",
-                    "description": "Default room ID to send messages to",
-                    "default": "GENERAL"
-                },
-                "RC_WEBHOOK_SECRET": {
-                    "type": "string",
-                    "description": "Secret token to validate incoming webhooks",
-                    "secret": true
-                }
+                "mentionNames": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                "forceThread": { "type": "boolean", "default": true },
+                "agent": { "type": "string", "minLength": 1 }
+              },
+              "required": ["enabled", "serverUrl", "auth"]
             }
+          }
         }
-    },
-    "configuration": {
-        "channels": [
-            "rocketchat"
-        ]
-    },
-    "entry": "dist/index.js"
+      },
+      "uiHints": {
+        "accounts.*.serverUrl": { "label": "Server URL", "placeholder": "https://chat.example.com" },
+        "accounts.*.auth.userId": { "label": "User ID" },
+        "accounts.*.auth.accessToken": { "label": "Access Token", "sensitive": true },
+        "accounts.*.auth.username": { "label": "Username" },
+        "accounts.*.auth.password": { "label": "Password", "sensitive": true },
+        "accounts.*.transport.pollIntervalMs": { "label": "Polling Interval (ms)", "placeholder": "3000" }
+      }
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "accounts": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "serverUrl": { "type": "string", "minLength": 1 },
+            "auth": {
+              "type": "object",
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "mode": { "const": "token" },
+                    "userId": { "type": "string", "minLength": 1 },
+                    "accessToken": { "type": "string", "minLength": 1 }
+                  },
+                  "required": ["mode", "userId", "accessToken"]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "mode": { "const": "password" },
+                    "username": { "type": "string", "minLength": 1 },
+                    "password": { "type": "string", "minLength": 1 }
+                  },
+                  "required": ["mode", "username", "password"]
+                }
+              ]
+            },
+            "transport": {
+              "type": "object",
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "mode": { "const": "polling" },
+                    "pollIntervalMs": { "type": "integer", "minimum": 1000 }
+                  },
+                  "required": ["mode"]
+                }
+              ]
+            },
+            "mentionNames": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "forceThread": { "type": "boolean", "default": true },
+            "agent": { "type": "string", "minLength": 1 }
+          },
+          "required": ["enabled", "serverUrl", "auth"]
+        }
+      }
+    }
+  }
 }
