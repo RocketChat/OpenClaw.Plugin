@@ -6,48 +6,15 @@ import {
   THINKING_PLACEHOLDER,
   WATCHDOG_STAGES,
 } from "./format.js";
-import type { InboundEvent } from "./inbound-event.js";
-
-type ChannelRuleOptions = {
-  botUserId: string;
-  mentionNames: string[];
-};
-
-type ReplyClient = {
-  postMessage(roomId: string, text: string, options?: { tmid?: string }): Promise<string>;
-  updateMessage(roomId: string, messageId: string, text: string): Promise<void>;
-  deleteMessage?(roomId: string, messageId: string): Promise<void>;
-};
-
-export type SendReplyLifecycleOptions = {
-  client: ReplyClient;
-  roomId: string;
-  tmid?: string | undefined;
-} & (
-  | {
-      finalText: string;
-      run?: never;
-    }
-  | {
-      finalText?: never;
-      run(session: ReplySession): Promise<void>;
-    }
-);
-
-type ReplyStageKind = "tool" | "block" | "final";
-
-type ReplyStagePayload = {
-  text?: string;
-  mediaUrl?: string;
-  mediaUrls?: string[];
-};
-
-export type ReplySession = {
-  messageId: string;
-  update(params: { kind: ReplyStageKind; payload: ReplyStagePayload }): Promise<void>;
-  hasFinalUpdate(): boolean;
-  fail(error: unknown): Promise<void>;
-};
+import type { InboundEvent } from "./types/types.js";
+import type {
+  ChannelRuleOptions,
+  ReplyClient,
+  SendReplyLifecycleOptions,
+  ReplyStageKind,
+  ReplyStagePayload,
+  ReplySession,
+} from "./types/types.js";
 
 export function shouldHandleInboundEvent(
   event: InboundEvent,
@@ -138,7 +105,6 @@ async function createReplySession(
       try {
         await client.updateMessage(roomId, messageId, stage.text);
       } catch {
-        // best-effort
       }
       if (stage.terminal) {
         stopWatchdog();
@@ -170,7 +136,6 @@ async function createReplySession(
           await client.deleteMessage(roomId, messageId);
           return;
         } catch {
-          // fall through to update
         }
       }
       await client.updateMessage(roomId, messageId, text);

@@ -1,18 +1,14 @@
+import type { WatchdogStage, ReplyPayload, ReplyProgressState } from "./types/types.js";
+
 export const THINKING_PLACEHOLDER = "Thinking...";
 export const EMPTY_REPLY_FALLBACK = "(no reply generated)";
-export const TOOL_REPLY_FALLBACK = "Tool in use...";
-export const BLOCK_REPLY_FALLBACK = "Building reply...";
-export const FAILED_REPLY_FALLBACK = "Failed to generate a reply. Please try again.";
+const TOOL_REPLY_FALLBACK = "Tool in use...";
+const BLOCK_REPLY_FALLBACK = "Building reply...";
+const FAILED_REPLY_FALLBACK = "Failed to generate a reply. Please try again.";
 
-export const TOOL_PROGRESS_HEADER = "Working on it...";
+const TOOL_PROGRESS_HEADER = "Working on it...";
 
 const MAX_PROGRESS_LINES = 6;
-
-export type WatchdogStage = {
-  afterSeconds: number;
-  text: string;
-  terminal?: boolean;
-};
 
 export const WATCHDOG_STAGES: WatchdogStage[] = [
   { afterSeconds: 60, text: "Still thinking... (1m+)" },
@@ -20,25 +16,15 @@ export const WATCHDOG_STAGES: WatchdogStage[] = [
   { afterSeconds: 900, text: "No response received. Please try again.", terminal: true },
 ];
 
-type ReplyPayload = {
-  text?: string;
-  mediaUrl?: string;
-  mediaUrls?: string[];
-};
-
-export type ReplyProgressState = {
-  lines: string[];
-};
-
 export function createReplyProgressState(): ReplyProgressState {
   return { lines: [] };
 }
 
-export function formatFinalReply(reply: string): string {
+function formatFinalReply(reply: string): string {
   return reply.trim().length > 0 ? reply : EMPTY_REPLY_FALLBACK;
 }
 
-export function renderToolProgress(lines: string[]): string {
+function renderToolProgress(lines: string[]): string {
   if (lines.length === 0) {
     return TOOL_PROGRESS_HEADER;
   }

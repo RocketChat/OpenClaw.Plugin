@@ -1,15 +1,7 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { basename, join, parse } from "node:path";
-import { randomUUID } from "node:crypto";
-
 import type {
   PluginAccountConfig,
   RocketChatIdentity,
   RocketChatSubscriptionRecord,
-  RoomInfo,
-  RocketChatAttachmentRecord,
-  RocketChatFileRecord,
   RocketChatMessageRecord,
   RocketChatClientOptions,
   JsonObject
@@ -35,14 +27,12 @@ export class RocketChatRateLimitError extends RocketChatClientError {
 export class RocketChatClient {
   private readonly serverUrl: string;
   private readonly auth: PluginAccountConfig["auth"];
-  private readonly mediaDir: string;
   private readonly fetchImpl: typeof fetch;
   private identity: RocketChatIdentity | null = null;
 
   constructor(options: RocketChatClientOptions) {
     this.serverUrl = options.serverUrl.replace(/\/+$/, "");
     this.auth = options.auth;
-    this.mediaDir = options.mediaDir?.trim() || tmpdir();
     this.fetchImpl = options.fetch ?? fetch;
   }
 
@@ -69,15 +59,6 @@ export class RocketChatClient {
     });
 
     return Array.isArray(payload.update) ? payload.update : [];
-  }
-
-  async listRooms(): Promise<RoomInfo[]> {
-    const subscriptions = await this.listSubscriptions(null);
-    return subscriptions.map((sub) => ({
-      id: sub.rid,
-      name: sub.fname || sub.name || sub.rid,
-      type: mapSubscriptionType(sub.t)
-    }));
   }
 
   async syncMessages(
@@ -126,70 +107,6 @@ export class RocketChatClient {
     });
   }
 
-  async getMessage(messageId: string): Promise<{
-    id: string;
-    text: string;
-    username: string;
-    ts: string;
-    tmid: string | null;
-  } | null> {
-    await this.initialize();
-    try {
-      const url = new URL("/api/v1/chat.getMessage", this.serverUrl);
-      url.searchParams.set("msgId", messageId);
-      const payload = await this.requestJson(url, { method: "GET" });
-      const message = asOptionalObject(payload.message);
-      if (!message) {
-        return null;
-      }
-      const user = asOptionalObject(message.u) ?? {};
-      const id = getOptionalString(message, "_id");
-      if (!id) {
-        return null;
-      }
-      return {
-        id,
-        text: getOptionalString(message, "msg") ?? "",
-        username: getOptionalString(user, "username") ?? "(unknown)",
-        ts: getOptionalString(message, "ts") ?? "",
-        tmid: getOptionalString(message, "tmid")
-      };
-    } catch (error) {
-      return null;
-    }
-  }
-
-  async getThreadMessages(
-    tmid: string,
-    count: number
-  ): Promise<Array<{ id: string; text: string; username: string; ts: string }>> {
-    await this.initialize();
-    try {
-      const url = new URL("/api/v1/chat.getThreadMessages", this.serverUrl);
-      url.searchParams.set("tmid", tmid);
-      url.searchParams.set("count", String(count));
-      const payload = await this.requestJson(url, { method: "GET" });
-      const messages = Array.isArray(payload.messages) ? payload.messages : [];
-      const parsed: Array<{ id: string; text: string; username: string; ts: string }> = [];
-      for (const raw of messages) {
-        const m = asOptionalObject(raw);
-        if (!m) continue;
-        const id = getOptionalString(m, "_id");
-        if (!id) continue;
-        const user = asOptionalObject(m.u) ?? {};
-        parsed.push({
-          id,
-          text: getOptionalString(m, "msg") ?? "",
-          username: getOptionalString(user, "username") ?? "(unknown)",
-          ts: getOptionalString(m, "ts") ?? ""
-        });
-      }
-      return parsed.reverse();
-    } catch (error) {
-      return [];
-    }
-  }
-
   async deleteMessage(roomId: string, messageId: string): Promise<void> {
     await this.initialize();
     await this.requestJson(new URL("/api/v1/chat.delete", this.serverUrl), {
@@ -200,102 +117,6 @@ export class RocketChatClient {
         asUser: true
       })
     });
-  }
-
-  async downloadAttachmentToTempFile(
-    url: string,
-    options?: { fileName?: string }
-  ): Promise<string> {
-    await this.initialize();
-    const requestUrl = resolveRequestUrl(url, this.serverUrl);
-
-    const response = await this.fetchImpl(requestUrl, {
-      method: "GET",
-      headers: {
-        Accept: "*/*",
-        ...this.authHeaders()
-      }
-    });
-
-    if (!response.ok) {
-      throw new RocketChatClientError(`Rocket.Chat attachment download failed: ${response.statusText}`);
-    }
-
-    const inboundDir = join(this.mediaDir, "inbound");
-    await mkdir(inboundDir, { recursive: true });
-    const filePath = join(
-      inboundDir,
-      buildStoredAttachmentFileName(resolveAttachmentFileName(requestUrl, options?.fileName))
-    );
-    const bytes = Buffer.from(await response.arrayBuffer());
-    await writeFile(filePath, bytes);
-
-    return filePath;
-  }
-
-  async uploadAttachment(
-    roomId: string,
-    filePath: string,
-    text?: string,
-    options?: { tmid?: string }
-  ): Promise<string> {
-    await this.initialize();
-
-    const fileName = basename(filePath);
-    const fileBytes = await readFile(filePath);
-    const formData = new FormData();
-    if (text?.trim()) {
-      formData.append("msg", text.trim());
-    }
-    if (options?.tmid) {
-      formData.append("tmid", options.tmid);
-    }
-    formData.append("file", new Blob([fileBytes]), fileName);
-
-    const uploadResponse = await this.fetchImpl(
-      new URL(`/api/v1/rooms.media/${encodeURIComponent(roomId)}`, this.serverUrl).toString(),
-      {
-        method: "POST",
-        headers: this.authHeaders(),
-        body: formData
-      }
-    );
-
-    if (!uploadResponse.ok) {
-      throw new RocketChatClientError(`Rocket.Chat attachment upload failed: ${uploadResponse.statusText}`);
-    }
-
-    const uploadPayload = await this.parseJsonResponse(uploadResponse);
-    const file = asOptionalObject(uploadPayload.file);
-    if (!file) {
-      throw new RocketChatClientError("Rocket.Chat attachment upload response missing file id");
-    }
-
-    const fileId = getString(file, "_id");
-    const confirmResponse = await this.fetchImpl(
-      new URL(
-        `/api/v1/rooms.mediaConfirm/${encodeURIComponent(roomId)}/${encodeURIComponent(fileId)}`,
-        this.serverUrl
-      ).toString(),
-      {
-        method: "POST",
-        headers: this.authHeaders()
-      }
-    );
-
-    if (!confirmResponse.ok) {
-      throw new RocketChatClientError(
-        `Rocket.Chat attachment confirm failed: ${confirmResponse.statusText}`
-      );
-    }
-
-    const confirmPayload = await this.parseJsonResponse(confirmResponse);
-    const message = asOptionalObject(confirmPayload.message);
-    if (message) {
-      return getString(message, "_id");
-    }
-
-    throw new RocketChatClientError("Rocket.Chat attachment confirm response missing message id");
   }
 
   private async loginWithPassword(): Promise<RocketChatIdentity> {
@@ -408,14 +229,6 @@ function asObject(value: unknown): JsonObject {
   throw new RocketChatClientError("Rocket.Chat API returned an invalid payload");
 }
 
-function asOptionalObject(value: unknown): JsonObject | null {
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    return value as JsonObject;
-  }
-
-  return null;
-}
-
 function getString(object: JsonObject, key: string): string {
   const value = object[key];
   if (typeof value === "string" && value.length > 0) {
@@ -463,65 +276,4 @@ function getRetryAfterMs(response: Response, payload: JsonObject): number {
   return 30_000;
 }
 
-function resolveAttachmentFileName(url: string, fileName: string | undefined): string {
-  const preferredName = fileName?.trim();
-  if (preferredName) {
-    return sanitizeFileName(preferredName);
-  }
 
-  try {
-    const pathName = new URL(url).pathname;
-    const candidate = pathName.split("/").filter(Boolean).at(-1);
-    if (candidate) {
-      return sanitizeFileName(decodeURIComponent(candidate));
-    }
-  } catch {
-    return "attachment";
-  }
-
-  return "attachment";
-}
-
-function resolveRequestUrl(url: string, serverUrl: string): string {
-  try {
-    return new URL(url).toString();
-  } catch {
-    return new URL(url, serverUrl).toString();
-  }
-}
-
-function buildStoredAttachmentFileName(fileName: string): string {
-  const parsed = parse(fileName);
-  const baseName = sanitizeFileName(parsed.name);
-  const extension = sanitizeExtension(parsed.ext);
-
-  if (!baseName) {
-    return `${randomUUID()}${extension}`;
-  }
-
-  return `${baseName}---${randomUUID()}${extension}`;
-}
-
-function sanitizeFileName(value: string): string {
-  return value.replace(/[^a-zA-Z0-9._-]+/g, "-") || "attachment";
-}
-
-function sanitizeExtension(value: string): string {
-  if (!value) {
-    return "";
-  }
-
-  return value.replace(/[^a-zA-Z0-9.]+/g, "");
-}
-
-function mapSubscriptionType(type: string | undefined): RoomInfo["type"] {
-  if (type === "d") {
-    return "direct";
-  }
-
-  if (type === "p") {
-    return "group";
-  }
-
-  return "channel";
-}

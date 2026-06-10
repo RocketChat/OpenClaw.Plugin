@@ -1,9 +1,5 @@
+import type { GatewayApi } from "./types/types.js";
 import { rocketchatPlugin, startGateway, listAccountIds, resolveAccount } from "./plugin.js";
-
-type GatewayApi = {
-  registerGatewayMethod(name: string, handler: (ctx: unknown) => Promise<void>): void;
-  registerChannel?(args: { plugin: unknown }): void;
-};
 
 export function register(api: GatewayApi) {
   api.registerChannel?.({ plugin: rocketchatPlugin });

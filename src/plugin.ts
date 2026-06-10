@@ -2,35 +2,21 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { RocketChatClient } from "./client.js";
-import { parsePluginConfig, type PluginAccountConfig } from "./config.js";
+import { parsePluginConfig } from "./config.js";
 import { FileCheckpointStore } from "./checkpoint-store.js";
-import type { InboundEvent } from "./inbound-event.js";
+import type { InboundEvent } from "./types/types.js";
 import { sendReplyLifecycle, shouldHandleInboundEvent } from "./channel.js";
-import {
-  dispatchInboundEventWithChannelRuntime,
-  type ChannelRuntimeLike,
-  type OpenClawConfigLike,
-} from "./inbound-dispatch.js";
+import { dispatchInboundEventWithChannelRuntime } from "./inbound-dispatch.js";
+import type {
+  ResolvedAccount,
+  OpenClawConfig,
+  GatewayContext,
+  OpenClawConfigLike,
+} from "./types/types.js";
 
-export type ResolvedAccount = PluginAccountConfig & {
-  accountId: string;
-};
+const activeClients = new Map<string, RocketChatClient>();
 
-export type OpenClawConfig = {
-  session?: { store?: string };
-  channels?: { rocketchat?: unknown };
-};
-
-export type GatewayContext = {
-  accountId: string;
-  account?: ResolvedAccount;
-  cfg?: OpenClawConfig;
-  abortSignal?: AbortSignal;
-  channelRuntime?: ChannelRuntimeLike;
-  setStatus?: (status: string) => void;
-};
-
-export let logger: { info: (msg: string) => void; error: (msg: string) => void } = {
+let logger: { info: (msg: string) => void; error: (msg: string) => void } = {
   info: (msg: string) => console.log(`[RC] ${msg}`),
   error: (msg: string) => console.error(`[RC] ${msg}`),
 };
@@ -57,12 +43,14 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
     return;
   }
 
-  const log = ctx.cfg ? logger : logger;
+  const log = logger;
   const client = new RocketChatClient({
     serverUrl: account.serverUrl,
     auth: account.auth,
   });
+  
   const identity = await client.initialize();
+  activeClients.set(account.accountId, client);
   ctx.setStatus?.("connected");
   log.info(`[rocketchat:${account.accountId}] connected as ${identity.username}`);
 
@@ -89,6 +77,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
         return;
       }
 
+      const seenIds = new Set(state.recentMessageIds);
       const subscriptions = await client.listSubscriptions(state.updatedSince);
       let nextUpdatedSince = state.updatedSince;
 
@@ -105,7 +94,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
             nextUpdatedSince = msgTs;
           }
 
-          if (await shouldSkipMessage(msg, identity.userId, checkpoint)) {
+          if (shouldSkipMessage(msg, identity.userId, seenIds)) {
             continue;
           }
 
@@ -121,10 +110,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
 
           if (ctx.channelRuntime) {
             const channelRuntime = ctx.channelRuntime;
-            const forceThread = account.forceThread !== false;
-            const replyTmid: string | undefined = forceThread
-              ? (event.tmid ?? event.messageId)
-              : (event.tmid ?? undefined);
+            const replyTmid = event.tmid ?? undefined;
 
             await sendReplyLifecycle({
               client,
@@ -162,11 +148,12 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
             }
           }
 
-          await checkpoint.markSeen(msg._id);
+          seenIds.add(msg._id);
         }
       }
 
-      await checkpoint.write({ updatedSince: nextUpdatedSince, recentMessageIds: (await checkpoint.read()).recentMessageIds });
+      const recentIds = [...seenIds].slice(-250);
+      await checkpoint.write({ updatedSince: nextUpdatedSince, recentMessageIds: recentIds });
     } catch (err) {
       log.error(`[rocketchat:${account.accountId}] poll error: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -189,20 +176,21 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
     });
   } finally {
     if (timer) clearInterval(timer);
+    activeClients.delete(account.accountId);
     ctx.setStatus?.("stopped");
   }
 }
 
-async function shouldSkipMessage(
+function shouldSkipMessage(
   msg: import("./types/types.js").RocketChatMessageRecord,
   botUserId: string,
-  checkpoint: FileCheckpointStore,
-): Promise<boolean> {
+  seenIds: Set<string>,
+): boolean {
   if (!msg._id) return true;
   if (msg.t) return true;
   if ((!msg.msg || msg.msg.trim().length === 0)) return true;
   if (msg.u?._id === botUserId) return true;
-  if (await checkpoint.hasSeen(msg._id)) return true;
+  if (seenIds.has(msg._id)) return true;
   return false;
 }
 
@@ -221,7 +209,6 @@ function toInboundEvent(
     senderName: msg.u?.username ?? msg.u?.name ?? "",
     text: msg.msg ?? "",
     mentions: (msg.mentions ?? []).map((m) => m.username ?? m.name ?? "").filter(Boolean),
-    attachments: [],
     sentAt: msg.ts ?? new Date(0).toISOString(),
     raw: msg,
   };
@@ -303,11 +290,13 @@ export const rocketchatPlugin = {
       }
       if (!account) throw new Error(`Unknown Rocket.Chat account: ${params.accountId}`);
 
-      const client = new RocketChatClient({
+      const client = activeClients.get(account.accountId) ?? new RocketChatClient({
         serverUrl: account.serverUrl,
         auth: account.auth,
       });
-      await client.initialize();
+      if (!activeClients.has(account.accountId)) {
+        await client.initialize();
+      }
       const tmidOptions = params.replyToId ? { tmid: params.replyToId } : undefined;
       const messageId = await client.postMessage(params.to, params.text, tmidOptions);
       return { ok: true, messageId, channel: "rocketchat" };
@@ -316,19 +305,6 @@ export const rocketchatPlugin = {
   gateway: {
     startAccount: startGateway,
   },
-};
-
-export const registerPlugin = (api: any) => {
-  logger = api.logger || {
-    info: (msg: string) => console.log(`[RC] ${msg}`),
-    error: (msg: string) => console.error(`[RC] ${msg}`),
-  };
-
-  try {
-    api.registerChannel({ plugin: rocketchatPlugin });
-  } catch {
-    // already registered
-  }
 };
 
 function parseChannelConfig(cfg: OpenClawConfig): ReturnType<typeof parsePluginConfig> {

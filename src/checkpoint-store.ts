@@ -1,10 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-export type CheckpointState = {
-  updatedSince: string | null;
-  recentMessageIds: string[];
-};
+import type { CheckpointState } from "./types/types.js";
 
 export class FileCheckpointStore {
   constructor(
@@ -34,9 +31,11 @@ export class FileCheckpointStore {
 
   async markSeen(messageId: string): Promise<void> {
     const state = await this.read();
-    state.recentMessageIds.push(messageId);
-    state.recentMessageIds = state.recentMessageIds.slice(-this.limit);
-    await this.write(state);
+    if (!state.recentMessageIds.includes(messageId)) {
+      state.recentMessageIds.push(messageId);
+      state.recentMessageIds = state.recentMessageIds.slice(-this.limit);
+      await this.write(state);
+    }
   }
 
   private async load(): Promise<{ updatedSince?: string | null; recentMessageIds?: string[] }> {
@@ -54,7 +53,6 @@ export class FileCheckpointStore {
         return parsed as { updatedSince?: string | null; recentMessageIds?: string[] };
       }
     } catch {
-      // corrupted — reset
     }
     return {};
   }
