@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "openclaw": {
     "extensions": [
-      "./dist/index.js"
+      "./src/index.ts"
     ]
   },
   "type": "module",
@@ -31,6 +31,7 @@
     "typescript": "^6.0.3"
   },
   "dependencies": {
-    "dotenv": "^17.4.2"
+    "dotenv": "^17.4.2",
+    "zod": "^4.4.3"
   }
 }
