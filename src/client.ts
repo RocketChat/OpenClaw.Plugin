@@ -119,6 +119,17 @@ export class RocketChatClient {
     });
   }
 
+  async reactToMessage(messageId: string, reaction: string): Promise<void> {
+    await this.initialize();
+    await this.requestJson(new URL("/api/v1/chat.react", this.serverUrl), {
+      method: "POST",
+      body: JSON.stringify({
+        messageId,
+        reaction
+      })
+    });
+  }
+
   private async loginWithPassword(): Promise<RocketChatIdentity> {
     if (this.auth.mode !== "password") {
       throw new RocketChatClientError("Password login requested for a token-auth client");

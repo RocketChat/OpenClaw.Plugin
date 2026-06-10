@@ -164,58 +164,6 @@ export type ChannelRuleOptions = {
   mentionNames: string[];
 };
 
-export type ReplyClient = {
-  postMessage(roomId: string, text: string, options?: { tmid?: string }): Promise<string>;
-  updateMessage(roomId: string, messageId: string, text: string): Promise<void>;
-  deleteMessage?(roomId: string, messageId: string): Promise<void>;
-};
-
-export type ReplyStageKind = "tool" | "block" | "final";
-
-export type ReplyStagePayload = {
-  text?: string;
-  mediaUrl?: string;
-  mediaUrls?: string[];
-};
-
-export type ReplySession = {
-  messageId: string;
-  update(params: { kind: ReplyStageKind; payload: ReplyStagePayload }): Promise<void>;
-  hasFinalUpdate(): boolean;
-  fail(error: unknown): Promise<void>;
-};
-
-export type SendReplyLifecycleOptions = {
-  client: ReplyClient;
-  roomId: string;
-  tmid?: string | undefined;
-} & (
-  | {
-      finalText: string;
-      run?: never;
-    }
-  | {
-      finalText?: never;
-      run(session: ReplySession): Promise<void>;
-    }
-);
-
-export type WatchdogStage = {
-  afterSeconds: number;
-  text: string;
-  terminal?: boolean;
-};
-
-export type ReplyPayload = {
-  text?: string;
-  mediaUrl?: string;
-  mediaUrls?: string[];
-};
-
-export type ReplyProgressState = {
-  lines: string[];
-};
-
 export type CheckpointState = {
   updatedSince: string | null;
   recentMessageIds: string[];

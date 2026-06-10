@@ -5,7 +5,7 @@ import { RocketChatClient } from "./client.js";
 import { parsePluginConfig } from "./config.js";
 import { FileCheckpointStore } from "./checkpoint-store.js";
 import type { InboundEvent } from "./types/types.js";
-import { sendReplyLifecycle, shouldHandleInboundEvent } from "./channel.js";
+import { shouldHandleInboundEvent } from "./channel.js";
 import { dispatchInboundEventWithChannelRuntime } from "./inbound-dispatch.js";
 import type {
   ResolvedAccount,
@@ -108,35 +108,41 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
             `[rocketchat:${account.accountId}] inbound from ${event.senderName}: "${event.text.slice(0, 80)}"`,
           );
 
+          const PROCESSING_EMOJIS = [
+            ":eyes:", ":thinking:", ":hourglass:", ":gear:",
+            ":robot:", ":arrows_counterclockwise:", ":bulb:", ":mag:"
+          ];
+
           if (ctx.channelRuntime) {
             const channelRuntime = ctx.channelRuntime;
             const replyTmid = event.tmid ?? undefined;
 
-            await sendReplyLifecycle({
-              client,
-              roomId: event.roomId,
-              tmid: replyTmid,
-              run: async (session) => {
-                await dispatchInboundEventWithChannelRuntime({
-                  cfg: (ctx.cfg ?? {}) as OpenClawConfigLike,
-                  accountId: account.accountId,
-                  event,
-                  channelRuntime,
-                  agent: account.agent,
-                  deliver: async (payload, info) => {
-                    await session.update({ kind: info.kind, payload });
-                  },
-                  onRecordError: (error) => {
-                    log.error(
-                      `[rocketchat:${account.accountId}] failed to record inbound session: ${error instanceof Error ? error.message : String(error)}`,
-                    );
-                  },
-                  onDispatchError: (error, info) => {
-                    log.error(
-                      `[rocketchat:${account.accountId}] ${info.kind} dispatch failed: ${error instanceof Error ? error.message : String(error)}`,
-                    );
-                  },
-                });
+            await client.reactToMessage(
+              event.messageId,
+              PROCESSING_EMOJIS[Math.floor(Math.random() * PROCESSING_EMOJIS.length)]!
+            ).catch(() => {});
+
+            await dispatchInboundEventWithChannelRuntime({
+              cfg: (ctx.cfg ?? {}) as OpenClawConfigLike,
+              accountId: account.accountId,
+              event,
+              channelRuntime,
+              agent: account.agent,
+              deliver: async (payload, info) => {
+                if (info.kind === "final") {
+                  await client.reactToMessage(event.messageId, ":white_check_mark:").catch(() => {});
+                  await client.postMessage(event.roomId, payload.text ?? "", replyTmid ? { tmid: replyTmid } : undefined);
+                }
+              },
+              onRecordError: (error) => {
+                log.error(
+                  `[rocketchat:${account.accountId}] failed to record inbound session: ${error instanceof Error ? error.message : String(error)}`,
+                );
+              },
+              onDispatchError: (error, info) => {
+                log.error(
+                  `[rocketchat:${account.accountId}] ${info.kind} dispatch failed: ${error instanceof Error ? error.message : String(error)}`,
+                );
               },
             });
           } else {
