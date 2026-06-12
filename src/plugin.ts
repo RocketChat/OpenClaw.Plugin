@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { RocketChatClient } from "./client.js";
+import { RocketChatClient, RocketChatRateLimitError } from "./client.js";
 import { parsePluginConfig } from "./config.js";
 import { FileCheckpointStore } from "./checkpoint-store.js";
 import type { InboundEvent } from "./types/types.js";
@@ -44,12 +44,13 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
   }
 
   const log = logger;
+  const auth = account.auth as { userId: string; accessToken: string };
   const client = new RocketChatClient({
     serverUrl: account.serverUrl,
-    auth: account.auth,
+    auth,
   });
   
-  const identity = await client.initialize();
+  const identity = await client.getIdentity();
   activeClients.set(account.accountId, client);
   ctx.setStatus?.("connected");
   log.info(`[rocketchat:${account.accountId}] connected as ${identity.username}`);
@@ -155,18 +156,29 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
           }
 
           seenIds.add(msg._id);
+          await checkpoint.write({ updatedSince: nextUpdatedSince, recentMessageIds: [...seenIds].slice(-250) });
         }
       }
-
-      const recentIds = [...seenIds].slice(-250);
-      await checkpoint.write({ updatedSince: nextUpdatedSince, recentMessageIds: recentIds });
     } catch (err) {
-      log.error(`[rocketchat:${account.accountId}] poll error: ${err instanceof Error ? err.message : String(err)}`);
+      if (err instanceof RocketChatRateLimitError) {
+        blockedUntilMs = Date.now() + err.retryAfterMs;
+        log.error(`[rocketchat:${account.accountId}] rate limited, backing off ${err.retryAfterMs}ms`);
+      } else {
+        log.error(`[rocketchat:${account.accountId}] poll error: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
   };
 
+  const scheduleNext = () => {
+    if (stopped) return;
+    timer = setTimeout(async () => {
+      await safePollOnce();
+      scheduleNext();
+    }, pollIntervalMs);
+  };
+
   await safePollOnce();
-  timer = setInterval(() => { void safePollOnce(); }, pollIntervalMs);
+  scheduleNext();
 
   try {
     await new Promise<void>((resolve) => {
@@ -181,7 +193,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
       }, { once: true });
     });
   } finally {
-    if (timer) clearInterval(timer);
+    if (timer) clearTimeout(timer);
     activeClients.delete(account.accountId);
     ctx.setStatus?.("stopped");
   }
@@ -298,11 +310,8 @@ export const rocketchatPlugin = {
 
       const client = activeClients.get(account.accountId) ?? new RocketChatClient({
         serverUrl: account.serverUrl,
-        auth: account.auth,
+        auth: account.auth as { userId: string; accessToken: string },
       });
-      if (!activeClients.has(account.accountId)) {
-        await client.initialize();
-      }
       const tmidOptions = params.replyToId ? { tmid: params.replyToId } : undefined;
       const messageId = await client.postMessage(params.to, params.text, tmidOptions);
       return { ok: true, messageId, channel: "rocketchat" };

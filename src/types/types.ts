@@ -38,8 +38,7 @@ export type RocketChatMessageRecord = {
 
 export type RocketChatClientOptions = {
   serverUrl: string;
-  auth: PluginAccountConfig["auth"];
-  fetch?: typeof fetch;
+  auth: { userId: string; accessToken: string };
 };
 
 export type JsonObject = Record<string, unknown>;

@@ -6,12 +6,6 @@ const tokenAuthSchema = z.object({
   accessToken: z.string().min(1)
 }).strict();
 
-const passwordAuthSchema = z.object({
-  mode: z.literal("password"),
-  username: z.string().min(1),
-  password: z.string().min(1)
-}).strict();
-
 const transportSchema = z.preprocess(
   (value) => value ?? { mode: "polling" },
   z.object({
@@ -23,7 +17,7 @@ const transportSchema = z.preprocess(
 const accountSchema = z.object({
   enabled: z.boolean(),
   serverUrl: z.string().min(1),
-  auth: z.union([tokenAuthSchema, passwordAuthSchema]),
+  auth: tokenAuthSchema,
   transport: transportSchema,
   mentionNames: z.array(z.string().min(1)).default([]),
   forceThread: z.boolean().default(true),
