@@ -14,7 +14,9 @@ import type {
   OpenClawConfigLike,
 } from "./types/types.js";
 
-const activeClients = new Map<string, RocketChatClient>();
+type ClientEntry = { client: RocketChatClient; generation: number };
+const activeClients = new Map<string, ClientEntry>();
+let nextGeneration = 0;
 
 let logger: { info: (msg: string) => void; error: (msg: string) => void } = {
   info: (msg: string) => console.log(`[RC] ${msg}`),
@@ -51,7 +53,8 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
   });
   
   const identity = await client.getIdentity();
-  activeClients.set(account.accountId, client);
+  const generation = nextGeneration++;
+  activeClients.set(account.accountId, { client, generation });
   ctx.setStatus?.("connected");
   log.info(`[rocketchat:${account.accountId}] connected as ${identity.username}`);
 
@@ -121,7 +124,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
             await client.reactToMessage(
               event.messageId,
               PROCESSING_EMOJIS[Math.floor(Math.random() * PROCESSING_EMOJIS.length)]!
-            ).catch(() => {});
+            ).catch((err) => log.error(`[rocketchat:${account.accountId}] reaction failed: ${err instanceof Error ? err.message : String(err)}`));
 
             await dispatchInboundEventWithChannelRuntime({
               cfg: (ctx.cfg ?? {}) as OpenClawConfigLike,
@@ -131,7 +134,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
               agent: account.agent,
               deliver: async (payload, info) => {
                 if (info.kind === "final") {
-                  await client.reactToMessage(event.messageId, ":white_check_mark:").catch(() => {});
+                  await client.reactToMessage(event.messageId, ":white_check_mark:").catch((err) => log.error(`[rocketchat:${account.accountId}] reaction failed: ${err instanceof Error ? err.message : String(err)}`));
                   await client.postMessage(event.roomId, payload.text ?? "", replyTmid ? { tmid: replyTmid } : undefined);
                 }
               },
@@ -194,7 +197,10 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
     });
   } finally {
     if (timer) clearTimeout(timer);
-    activeClients.delete(account.accountId);
+    const current = activeClients.get(account.accountId);
+    if (current?.generation === generation) {
+      activeClients.delete(account.accountId);
+    }
     ctx.setStatus?.("stopped");
   }
 }
@@ -308,7 +314,8 @@ export const rocketchatPlugin = {
       }
       if (!account) throw new Error(`Unknown Rocket.Chat account: ${params.accountId}`);
 
-      const client = activeClients.get(account.accountId) ?? new RocketChatClient({
+      const entry = activeClients.get(account.accountId);
+      const client = entry?.client ?? new RocketChatClient({
         serverUrl: account.serverUrl,
         auth: account.auth as { userId: string; accessToken: string },
       });

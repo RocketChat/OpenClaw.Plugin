@@ -93,8 +93,10 @@ export class RocketChatClient {
   }
 
   private async requestJson(url: URL, init: RequestInit): Promise<JsonObject> {
+    const signal = init.signal ?? AbortSignal.timeout(15_000);
     const response = await fetch(url.toString(), {
       ...init,
+      signal,
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
@@ -103,7 +105,6 @@ export class RocketChatClient {
         ...(init.headers as Record<string, string> ?? {}),
       },
     });
-
     return this.parseJsonResponse(response);
   }
 

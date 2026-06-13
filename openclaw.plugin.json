@@ -39,7 +39,7 @@
                   "required": ["mode"]
                 },
                 "mentionNames": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-                "forceThread": { "type": "boolean", "default": true },
+                "forceThread": { "type": "boolean", "default": false },
                 "transcribeAudio": { "type": "boolean", "default": true },
                 "agent": { "type": "string", "minLength": 1 }
               },
@@ -88,7 +88,7 @@
               "required": ["mode"]
             },
             "mentionNames": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-            "forceThread": { "type": "boolean", "default": true },
+            "forceThread": { "type": "boolean", "default": false },
             "transcribeAudio": { "type": "boolean", "default": true },
             "agent": { "type": "string", "minLength": 1 }
           },
