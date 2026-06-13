@@ -1,7 +1,9 @@
 import type {
+  PluginAccountConfig,
   RocketChatIdentity,
   RocketChatSubscriptionRecord,
   RocketChatMessageRecord,
+  RocketChatClientOptions,
   JsonObject
 } from "./types/types.js";
 
@@ -26,11 +28,16 @@ export class RocketChatClient {
   private readonly serverUrl: string;
   private readonly userId: string;
   private readonly accessToken: string;
+  private readonly fetchFn: typeof fetch;
 
-  constructor(options: { serverUrl: string; auth: { userId: string; accessToken: string } }) {
+  constructor(options: RocketChatClientOptions) {
+    if (options.auth.mode !== "token") {
+      throw new RocketChatClientError("only token auth is supported");
+    }
     this.serverUrl = options.serverUrl.replace(/\/+$/, "");
     this.userId = options.auth.userId;
     this.accessToken = options.auth.accessToken;
+    this.fetchFn = options.fetch ?? globalThis.fetch;
   }
 
   async getIdentity(): Promise<RocketChatIdentity> {
@@ -94,7 +101,7 @@ export class RocketChatClient {
 
   private async requestJson(url: URL, init: RequestInit): Promise<JsonObject> {
     const signal = init.signal ?? AbortSignal.timeout(15_000);
-    const response = await fetch(url.toString(), {
+    const response = await this.fetchFn(url.toString(), {
       ...init,
       signal,
       headers: {

@@ -46,7 +46,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
   }
 
   const log = logger;
-  const auth = account.auth as { userId: string; accessToken: string };
+  const auth = account.auth as { mode: "token"; userId: string; accessToken: string };
   const client = new RocketChatClient({
     serverUrl: account.serverUrl,
     auth,
@@ -317,7 +317,7 @@ export const rocketchatPlugin = {
       const entry = activeClients.get(account.accountId);
       const client = entry?.client ?? new RocketChatClient({
         serverUrl: account.serverUrl,
-        auth: account.auth as { userId: string; accessToken: string },
+        auth: account.auth as { mode: "token"; userId: string; accessToken: string },
       });
       const tmidOptions = params.replyToId ? { tmid: params.replyToId } : undefined;
       const messageId = await client.postMessage(params.to, params.text, tmidOptions);
