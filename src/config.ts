@@ -26,7 +26,7 @@ const accountSchema = z.object({
   auth: z.union([tokenAuthSchema, passwordAuthSchema]),
   transport: transportSchema,
   mentionNames: z.array(z.string().min(1)).default([]),
-  forceThread: z.boolean().default(true),
+  forceThread: z.boolean().default(false),
   agent: z.string().min(1).optional(),
   transcribeAudio: z.boolean().default(true)
 }).strict();
@@ -40,7 +40,12 @@ export type PluginAccountConfig = PluginConfig["accounts"][string];
 
 function substituteEnvVars(value: unknown, env: NodeJS.ProcessEnv = process.env): unknown {
   if (typeof value === "string") {
-    return value.replace(/\$\{([A-Z0-9_]+)\}/gi, (_match, name) => env[name] ?? "");
+    return value.replace(/\$\{([A-Z0-9_]+)\}/gi, (_match, name) => {
+      if (!(name in env)) {
+        console.warn(`[config] environment variable "${name}" is not set, substituting with empty string`);
+      }
+      return env[name] ?? "";
+    });
   }
   if (Array.isArray(value)) {
     return value.map((item) => substituteEnvVars(item, env));
