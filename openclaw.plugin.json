@@ -62,17 +62,13 @@
                 "transcribeAudio": { "type": "boolean", "default": true },
                 "agent": { "type": "string", "minLength": 1 }
               },
-              "required": ["enabled", "serverUrl", "auth"]
+              "required": ["enabled", "serverUrl"]
             }
           }
         }
       },
       "uiHints": {
         "accounts.*.serverUrl": { "label": "Server URL", "placeholder": "https://chat.example.com" },
-        "accounts.*.auth.userId": { "label": "User ID" },
-        "accounts.*.auth.accessToken": { "label": "Access Token", "sensitive": true },
-        "accounts.*.auth.username": { "label": "Username" },
-        "accounts.*.auth.password": { "label": "Password", "sensitive": true },
         "accounts.*.transport.pollIntervalMs": { "label": "Polling Interval (ms)", "placeholder": "3000" }
       }
     }
@@ -132,7 +128,7 @@
             "transcribeAudio": { "type": "boolean", "default": true },
             "agent": { "type": "string", "minLength": 1 }
           },
-          "required": ["enabled", "serverUrl", "auth"]
+          "required": ["enabled", "serverUrl"]
         }
       }
     }

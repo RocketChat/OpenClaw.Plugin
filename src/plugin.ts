@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { RocketChatClient, RocketChatRateLimitError } from "./client.js";
 import { parsePluginConfig } from "./config.js";
 import { FileCheckpointStore } from "./checkpoint-store.js";
+import * as store from "./cli/credential-store.js";
 import type { InboundEvent } from "./types/types.js";
 import { shouldHandleInboundEvent } from "./channel.js";
 import { dispatchInboundEventWithChannelRuntime } from "./inbound-dispatch.js";
@@ -35,7 +36,9 @@ export function listAccountIds(cfg: OpenClawConfig): string[] {
 }
 
 function isConfigured(account: Partial<ResolvedAccount> | null | undefined): boolean {
-  return Boolean(account?.serverUrl && account.auth);
+  if (!account?.serverUrl) return false;
+  if (account.accountId && store.exists(account.accountId)) return true;
+  return Boolean(account.auth);
 }
 
 export async function startGateway(ctx: GatewayContext): Promise<void> {
@@ -46,7 +49,8 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
   }
 
   const log = logger;
-  const auth = account.auth as { mode: "token"; userId: string; accessToken: string };
+  const stored = await store.read(account.accountId).catch(() => null);
+  const auth = stored?.auth ?? account.auth as { mode: "token"; userId: string; accessToken: string };
   const client = new RocketChatClient({
     serverUrl: account.serverUrl,
     auth,
@@ -315,10 +319,12 @@ export const rocketchatPlugin = {
       if (!account) throw new Error(`Unknown Rocket.Chat account: ${params.accountId}`);
 
       const entry = activeClients.get(account.accountId);
-      const client = entry?.client ?? new RocketChatClient({
-        serverUrl: account.serverUrl,
-        auth: account.auth as { mode: "token"; userId: string; accessToken: string },
-      });
+      let client = entry?.client ?? null;
+      if (!client) {
+        const stored = await store.read(account.accountId).catch(() => null);
+        const auth = stored?.auth ?? account.auth as { mode: "token"; userId: string; accessToken: string };
+        client = new RocketChatClient({ serverUrl: account.serverUrl, auth });
+      }
       const tmidOptions = params.replyToId ? { tmid: params.replyToId } : undefined;
       const messageId = await client.postMessage(params.to, params.text, tmidOptions);
       return { ok: true, messageId, channel: "rocketchat" };
