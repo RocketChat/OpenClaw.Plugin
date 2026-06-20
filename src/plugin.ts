@@ -15,7 +15,7 @@ import type {
   OpenClawConfigLike,
 } from "./types/types.js";
 
-type ClientEntry = { client: RocketChatClient; generation: number };
+type ClientEntry = { client: RocketChatClient; generation: number; wakeup: () => void };
 const activeClients = new Map<string, ClientEntry>();
 let nextGeneration = 0;
 
@@ -58,7 +58,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
   
   const identity = await client.getIdentity();
   const generation = nextGeneration++;
-  activeClients.set(account.accountId, { client, generation });
+  activeClients.set(account.accountId, { client, generation, wakeup: () => {} });
   ctx.setStatus?.("connected");
   log.info(`[rocketchat:${account.accountId}] connected as ${identity.username}`);
 
@@ -66,17 +66,28 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
   const checkpointPath = `${stateDir}/rocketchat/${account.accountId}.json`;
   const checkpoint = new FileCheckpointStore(checkpointPath, 250);
 
-  const pollIntervalMs = account.transport.pollIntervalMs ?? 3000;
   let blockedUntilMs = 0;
+  let consecutiveEmptyPolls = 0;
   let timer: ReturnType<typeof setInterval> | null = null;
   let stopped = false;
   let warnedAboutMissingRuntime = false;
+
+  const getPollInterval = (): number => {
+    if (consecutiveEmptyPolls < 3) return 3_000;
+    if (consecutiveEmptyPolls < 10) return 10_000;
+    if (consecutiveEmptyPolls < 20) return 30_000;
+    return 60_000;
+  };
 
   const mentionNames = dedupeMentions([identity.username, ...account.mentionNames]);
 
   const safePollOnce = async (): Promise<void> => {
     if (stopped) return;
-    if (Date.now() < blockedUntilMs) return;
+    if (Date.now() < blockedUntilMs) {
+      log.info(`[rocketchat:${account.accountId}] poll skipped, blocked for ${blockedUntilMs - Date.now()}ms`);
+      return;
+    }
+    log.info(`[rocketchat:${account.accountId}] poll tick (CEP=${consecutiveEmptyPolls}, interval=${getPollInterval()}ms)`);
 
     try {
       const state = await checkpoint.read();
@@ -88,6 +99,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
       const seenIds = new Set(state.recentMessageIds);
       const subscriptions = await client.listSubscriptions(state.updatedSince);
       let nextUpdatedSince = state.updatedSince;
+      let foundMessages = false;
 
       for (const sub of subscriptions) {
         const subTs = sub._updatedAt ?? sub.updatedAt ?? null;
@@ -96,6 +108,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
         }
 
         const messages = await client.syncMessages(sub.rid, state.updatedSince);
+        messages.sort((a, b) => (a.ts ?? a._updatedAt ?? "").localeCompare(b.ts ?? b._updatedAt ?? ""));
         for (const msg of messages) {
           const msgTs = msg.ts ?? msg._updatedAt ?? null;
           if (msgTs && msgTs > nextUpdatedSince) {
@@ -111,6 +124,8 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
           if (!shouldHandleInboundEvent(event, { botUserId: identity.userId, mentionNames })) {
             continue;
           }
+
+          foundMessages = true;
 
           log.info(
             `[rocketchat:${account.accountId}] inbound from ${event.senderName}: "${event.text.slice(0, 80)}"`,
@@ -130,7 +145,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
               PROCESSING_EMOJIS[Math.floor(Math.random() * PROCESSING_EMOJIS.length)]!
             ).catch((err) => log.error(`[rocketchat:${account.accountId}] reaction failed: ${err instanceof Error ? err.message : String(err)}`));
 
-            await dispatchInboundEventWithChannelRuntime({
+            dispatchInboundEventWithChannelRuntime({
               cfg: (ctx.cfg ?? {}) as OpenClawConfigLike,
               accountId: account.accountId,
               event,
@@ -166,9 +181,13 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
           await checkpoint.write({ updatedSince: nextUpdatedSince, recentMessageIds: [...seenIds].slice(-250) });
         }
       }
+
+      consecutiveEmptyPolls = foundMessages ? 0 : consecutiveEmptyPolls + 1;
+      log.info(`[rocketchat:${account.accountId}] poll done (found=${foundMessages}, CEP=${consecutiveEmptyPolls}, nextInterval=${getPollInterval()}ms)`);
     } catch (err) {
       if (err instanceof RocketChatRateLimitError) {
         blockedUntilMs = Date.now() + err.retryAfterMs;
+        consecutiveEmptyPolls = Math.max(consecutiveEmptyPolls, 10);
         log.error(`[rocketchat:${account.accountId}] rate limited, backing off ${err.retryAfterMs}ms`);
       } else {
         log.error(`[rocketchat:${account.accountId}] poll error: ${err instanceof Error ? err.message : String(err)}`);
@@ -178,11 +197,25 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
 
   const scheduleNext = () => {
     if (stopped) return;
+    const delay = getPollInterval();
+    log.info(`[rocketchat:${account.accountId}] next poll in ${delay}ms (CEP=${consecutiveEmptyPolls})`);
     timer = setTimeout(async () => {
       await safePollOnce();
       scheduleNext();
-    }, pollIntervalMs);
+    }, delay);
   };
+
+  const wakeup = () => {
+    if (stopped) return;
+    log.info(`[rocketchat:${account.accountId}] wakeup triggered, resetting CEP`);
+    consecutiveEmptyPolls = 0;
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    scheduleNext();
+  };
+  activeClients.set(account.accountId, { client, generation, wakeup });
 
   await safePollOnce();
   scheduleNext();
@@ -327,6 +360,7 @@ export const rocketchatPlugin = {
       }
       const tmidOptions = params.replyToId ? { tmid: params.replyToId } : undefined;
       const messageId = await client.postMessage(params.to, params.text, tmidOptions);
+      entry?.wakeup?.();
       return { ok: true, messageId, channel: "rocketchat" };
     },
   },
