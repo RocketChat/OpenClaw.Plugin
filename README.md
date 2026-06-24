@@ -43,10 +43,7 @@ The plugin requires an account entry under `channels.rocketchat` in your `opencl
             "userId": "<your-user-id>",
             "accessToken": "<your-personal-access-token>"
           },
-          "transport": {
-            "mode": "polling",
-            "pollIntervalMs": 3000
-          },
+          "transport": { "mode": "polling" },
           "mentionNames": ["rocketbot"]
         }
       }

@@ -1,5 +1,5 @@
 import type { GatewayApi } from "./types/types.js";
-import { rocketchatPlugin, startGateway, listAccountIds, resolveAccount } from "./plugin.js";
+import { rocketchatPlugin, startGateway, listAccountIds, resolveAccount, isConfigured } from "./plugin.js";
 
 export function register(api: GatewayApi) {
   api.registerChannel?.({ plugin: rocketchatPlugin });
@@ -19,10 +19,7 @@ export default {
   config: {
     listAccountIds,
     resolveAccount,
-    isConfigured(account: unknown) {
-      const a = account as { serverUrl?: string; auth?: unknown } | null | undefined;
-      return Boolean(a?.serverUrl && a.auth);
-    }
+    isConfigured,
   },
   register,
   activate,

@@ -20,28 +20,14 @@
                 "enabled": { "type": "boolean" },
                 "serverUrl": { "type": "string", "minLength": 1 },
                 "auth": {
-                  "oneOf": [
-                    {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "mode": { "const": "token" },
-                        "userId": { "type": "string", "minLength": 1 },
-                        "accessToken": { "type": "string", "minLength": 1 }
-                      },
-                      "required": ["mode", "userId", "accessToken"]
-                    },
-                    {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "mode": { "const": "password" },
-                        "username": { "type": "string", "minLength": 1 },
-                        "password": { "type": "string", "minLength": 1 }
-                      },
-                      "required": ["mode", "username", "password"]
-                    }
-                  ]
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "mode": { "const": "token" },
+                    "userId": { "type": "string", "minLength": 1 },
+                    "accessToken": { "type": "string", "minLength": 1 }
+                  },
+                  "required": ["mode", "userId", "accessToken"]
                 },
                 "transport": {
                   "type": "object",
@@ -50,30 +36,22 @@
                       "type": "object",
                       "additionalProperties": false,
                       "properties": {
-                        "mode": { "const": "polling" },
-                        "pollIntervalMs": { "type": "integer", "minimum": 1000 }
+                        "mode": { "const": "polling" }
                       },
                       "required": ["mode"]
                     }
                   ]
                 },
                 "mentionNames": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-                "forceThread": { "type": "boolean", "default": false },
-                "transcribeAudio": { "type": "boolean", "default": true },
                 "agent": { "type": "string", "minLength": 1 }
               },
-              "required": ["enabled", "serverUrl", "auth"]
+              "required": ["enabled", "serverUrl"]
             }
           }
         }
       },
       "uiHints": {
-        "accounts.*.serverUrl": { "label": "Server URL", "placeholder": "https://chat.example.com" },
-        "accounts.*.auth.userId": { "label": "User ID" },
-        "accounts.*.auth.accessToken": { "label": "Access Token", "sensitive": true },
-        "accounts.*.auth.username": { "label": "Username" },
-        "accounts.*.auth.password": { "label": "Password", "sensitive": true },
-        "accounts.*.transport.pollIntervalMs": { "label": "Polling Interval (ms)", "placeholder": "3000" }
+        "accounts.*.serverUrl": { "label": "Server URL", "placeholder": "https://chat.example.com" }
       }
     }
   },
@@ -90,28 +68,14 @@
             "enabled": { "type": "boolean" },
             "serverUrl": { "type": "string", "minLength": 1 },
             "auth": {
-              "oneOf": [
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "mode": { "const": "token" },
-                    "userId": { "type": "string", "minLength": 1 },
-                    "accessToken": { "type": "string", "minLength": 1 }
-                  },
-                  "required": ["mode", "userId", "accessToken"]
-                },
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "mode": { "const": "password" },
-                    "username": { "type": "string", "minLength": 1 },
-                    "password": { "type": "string", "minLength": 1 }
-                  },
-                  "required": ["mode", "username", "password"]
-                }
-              ]
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "mode": { "const": "token" },
+                "userId": { "type": "string", "minLength": 1 },
+                "accessToken": { "type": "string", "minLength": 1 }
+              },
+              "required": ["mode", "userId", "accessToken"]
             },
             "transport": {
               "type": "object",
@@ -120,19 +84,16 @@
                   "type": "object",
                   "additionalProperties": false,
                   "properties": {
-                    "mode": { "const": "polling" },
-                    "pollIntervalMs": { "type": "integer", "minimum": 1000 }
+                    "mode": { "const": "polling" }
                   },
                   "required": ["mode"]
                 }
               ]
             },
             "mentionNames": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-            "forceThread": { "type": "boolean", "default": false },
-            "transcribeAudio": { "type": "boolean", "default": true },
             "agent": { "type": "string", "minLength": 1 }
           },
-          "required": ["enabled", "serverUrl", "auth"]
+          "required": ["enabled", "serverUrl"]
         }
       }
     }

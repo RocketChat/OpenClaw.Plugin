@@ -4,7 +4,7 @@ import type {
   RocketChatSubscriptionRecord,
   RocketChatMessageRecord,
   RocketChatClientOptions,
-  JsonObject
+  JsonObject,
 } from "./types/types.js";
 
 export class RocketChatClientError extends Error {
@@ -116,7 +116,14 @@ export class RocketChatClient {
   }
 
   private async parseJsonResponse(response: Response): Promise<JsonObject> {
-    const payload = (await response.json()) as JsonObject;
+    let payload: JsonObject;
+    try {
+      payload = (await response.json()) as JsonObject;
+    } catch (err) {
+      throw new RocketChatClientError(
+        `Rocket.Chat API returned non-JSON response (status ${response.status}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
 
     if (response.status === 429 || payload.errorType === "error-too-many-requests") {
       throw new RocketChatRateLimitError(getErrorMessage(payload, "Rocket.Chat API rate limited"), {
@@ -190,3 +197,4 @@ function getRetryAfterMs(response: Response, payload: JsonObject): number {
 
   return 30_000;
 }
+
