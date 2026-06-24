@@ -1,6 +1,5 @@
 import type { GatewayApi } from "./types/types.js";
-import { rocketchatPlugin, startGateway, listAccountIds, resolveAccount } from "./plugin.js";
-import * as store from "./cli/credential-store.js";
+import { rocketchatPlugin, startGateway, listAccountIds, resolveAccount, isConfigured } from "./plugin.js";
 
 export function register(api: GatewayApi) {
   api.registerChannel?.({ plugin: rocketchatPlugin });
@@ -20,12 +19,7 @@ export default {
   config: {
     listAccountIds,
     resolveAccount,
-    isConfigured(account: unknown) {
-      const a = account as { serverUrl?: string; accountId?: string } | null | undefined;
-      if (!a?.serverUrl) return false;
-      if (a.accountId && store.exists(a.accountId)) return true;
-      return Boolean((a as any).auth);
-    }
+    isConfigured,
   },
   register,
   activate,

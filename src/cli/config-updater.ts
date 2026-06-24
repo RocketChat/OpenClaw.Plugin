@@ -23,7 +23,7 @@ export function updateConfig(opts: {
   pluginId: string;
   accountId: string;
   serverUrl: string;
-  transport?: { mode: string; pollIntervalMs?: number };
+  transport?: { mode: string };
   mentionNames?: string[];
   auth: AuthCredentials;
 }) {
@@ -48,18 +48,10 @@ export function updateConfig(opts: {
     enabled: true,
     serverUrl: opts.serverUrl,
     auth: { mode: "token", userId: opts.auth.userId, accessToken: opts.auth.accessToken },
-    transport: opts.transport ?? { mode: "polling", pollIntervalMs: 5000 },
+    transport: opts.transport ?? { mode: "polling" },
     mentionNames: opts.mentionNames ?? [],
   };
 
   writeConfig(cfg);
 }
 
-export function removeAccount(accountId: string): boolean {
-  const cfg = readConfig() as Record<string, any>;
-  const accounts = cfg.channels?.rocketchat?.accounts;
-  if (!accounts || !accounts[accountId]) return false;
-  delete accounts[accountId];
-  writeConfig(cfg);
-  return true;
-}

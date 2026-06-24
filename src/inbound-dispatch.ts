@@ -5,7 +5,6 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
   accountId: string;
   event: InboundEvent;
   channelRuntime: ChannelRuntimeLike;
-  agent?: string | undefined;
   deliver(payload: OutboundReplyPayload, info: ReplyDeliverInfo): Promise<void>;
   onRecordError(err: unknown): void;
   onDispatchError(err: unknown, info: ReplyDeliverInfo): void;

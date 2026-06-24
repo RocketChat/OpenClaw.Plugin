@@ -2,7 +2,7 @@ import { createInterface } from "node:readline";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { loginAs, createBotUser, getUserByUsername, createDirectMessage, sendMessage } from "../client.js";
+import { loginAs, createBotUser, getUserByUsername, createDirectMessage, sendMessage } from "./admin-api.js";
 import * as store from "./credential-store.js";
 import { updateConfig } from "./config-updater.js";
 import type { RCLoginResult } from "../types/types.js";
@@ -132,7 +132,7 @@ async function main() {
       pluginId: "rocketchat",
       accountId: "main",
       serverUrl: rcUrl,
-      transport: { mode: "polling", pollIntervalMs: 5000 },
+      transport: { mode: "polling" },
       mentionNames: [botUsername],
       auth: { mode: "token", userId: botAuth.userId, accessToken: botAuth.authToken },
     });

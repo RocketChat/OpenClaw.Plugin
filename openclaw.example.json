@@ -1,0 +1,91 @@
+{
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "nvidia-nim": {
+        "baseUrl": "http://127.0.0.1:8082",
+        "apiKey": "your-nvidia-nim-api-key",
+        "api": "anthropic-messages",
+        "models": [
+          {
+            "id": "anthropic/nvidia_nim/nvidia/nemotron-3-super-120b-a12b",
+            "name": "Nemotron 120B (NVIDIA NIM)",
+            "contextWindow": 131072,
+            "maxTokens": 8192
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "nvidia-nim/anthropic/nvidia_nim/nvidia/nemotron-3-super-120b-a12b",
+      "models": {
+        "nvidia-nim/anthropic/nvidia_nim/nvidia/nemotron-3-super-120b-a12b": {}
+      },
+      "workspace": "~/.openclaw/workspace",
+      "memorySearch": { "enabled": true },
+      "compaction": { "mode": "safeguard" },
+      "timeoutSeconds": 300,
+      "maxConcurrent": 4,
+      "subagents": { "maxConcurrent": 8 }
+    }
+  },
+  "tools": {
+    "web": {
+      "search": { "enabled": false },
+      "fetch": { "enabled": false }
+    }
+  },
+  "commands": {
+    "native": true,
+    "restart": true,
+    "ownerDisplay": "raw"
+  },
+  "session": {
+    "dmScope": "per-channel-peer"
+  },
+  "hooks": {
+    "enabled": true,
+    "token": "your-hook-secret-token",
+    "allowRequestSessionKey": false,
+    "allowedSessionKeyPrefixes": ["hook:"],
+    "internal": { "enabled": true }
+  },
+  "channels": {
+    "rocketchat": {
+      "accounts": {
+        "main": {
+          "enabled": true,
+          "serverUrl": "http://localhost:3000",
+          "auth": {
+            "mode": "token",
+            "userId": "your-bot-user-id",
+            "accessToken": "your-bot-access-token"
+          },
+          "transport": { "mode": "polling" },
+          "mentionNames": ["your-bot-username"]
+        }
+      }
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "loopback",
+    "auth": {
+      "mode": "token",
+      "token": "your-gateway-auth-token"
+    }
+  },
+  "plugins": {
+    "allow": ["memory-core", "rocketchat"],
+    "bundledDiscovery": "allowlist",
+    "load": {
+      "paths": ["./dist/index.js"]
+    },
+    "entries": {
+      "rocketchat": { "enabled": true }
+    }
+  }
+}
