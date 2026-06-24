@@ -17,7 +17,8 @@ The plugin uses REST polling on a configurable interval to fetch new messages fr
 
 ## What's Being Worked On
 
-- [ ] Auth configuration window / setup wizard
+- [x] Auth configuration window / setup wizard
+- [x] Updated polling to reduce no of requests
 - [ ] Concurrency control / per-room message queue
 - [ ] Rate limiting and security hardening
 - [ ] Media and attachment handling (images, files, audio)
@@ -28,7 +29,7 @@ The plugin uses REST polling on a configurable interval to fetch new messages fr
 
 ## Configuration
 
-The plugin requires an account entry under `channels.rocketchat` in your `openclaw.json`:
+Added as `Example openclaw.example.json` in codebase
 
 ```json
 {
@@ -94,7 +95,3 @@ Add the plugin path to your `openclaw.json`:
   }
 }
 ```
-
-## Conclusion
-
-This plugin simplifies the Rocket.Chat + OpenClaw integration into a single deployment. No more managing separate bridge services — just configure, install, and your Rocket.Chat users can talk to OpenClaw agents directly.
