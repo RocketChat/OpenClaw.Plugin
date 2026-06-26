@@ -5,3 +5,4 @@ node_modules
 dist
 *.txt
 *.mjs
+AGENTS.md

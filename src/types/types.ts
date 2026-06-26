@@ -174,11 +174,9 @@ export type GatewayApi = {
   registerChannel?(args: { plugin: unknown }): void;
 };
 
-export type AuthCredentials = {
-  mode: "token";
-  userId: string;
-  accessToken: string;
-};
+export type AuthCredentials =
+  | { mode: "token"; userId: string; accessToken: string }
+  | { mode: "password"; username: string; password: string };
 
 export type AccountCredentials = {
   accountId: string;

@@ -3,19 +3,11 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { loginAs, createBotUser, getUserByUsername, createDirectMessage, sendMessage } from "./admin-api.js";
-import * as store from "./credential-store.js";
 import { updateConfig } from "./config-updater.js";
 import type { RCLoginResult } from "../types/types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_PATH = resolve(__dirname, "..", "..");
-
-interface PrevConfig {
-  rcUrl?: string;
-  bot?: { username?: string; name?: string; email?: string } | undefined;
-}
-
-let prev: PrevConfig = {};
 
 function prompt(question: string, fallback?: string): Promise<string> {
   return new Promise((resolve) => {
@@ -25,6 +17,57 @@ function prompt(question: string, fallback?: string): Promise<string> {
       rl.close();
       resolve(answer.trim() || fallback || "");
     });
+  });
+}
+
+function promptPassword(question: string): Promise<string> {
+  return new Promise((resolve) => {
+    const stdin = process.stdin;
+    const stdout = process.stdout;
+
+    stdout.write(`  ${question}: `);
+
+    const wasRaw = stdin.isRaw;
+    stdin.setRawMode(true);
+    stdin.resume();
+
+    let password = "";
+
+    const onData = (data: Buffer) => {
+      const bytes = [...data];
+
+      if (bytes[0] === 0x1b) return;
+
+      if (bytes[0] === 0x0d || bytes[0] === 0x0a) {
+        stdin.removeListener("data", onData);
+        stdin.setRawMode(wasRaw ?? false);
+        stdin.pause();
+        stdout.write("\n");
+        resolve(password);
+        return;
+      }
+
+      if (bytes[0] === 0x03) {
+        stdin.removeListener("data", onData);
+        stdin.setRawMode(wasRaw ?? false);
+        stdin.pause();
+        process.exit(1);
+        return;
+      }
+
+      if (bytes[0] === 0x7f || bytes[0] === 0x08) {
+        if (password.length > 0) {
+          password = password.slice(0, -1);
+          stdout.write("\b \b");
+        }
+        return;
+      }
+
+      password += data.toString("utf-8");
+      stdout.write("*");
+    };
+
+    stdin.on("data", onData);
   });
 }
 
@@ -39,23 +82,10 @@ function heading(n: number, title: string) {
 async function main() {
   console.log(`\n  OpenClaw Rocket.Chat Setup\n`);
 
-  const prevConfig = await store.read("main");
-  if (prevConfig) {
-    if (prevConfig.bot) {
-      prev.bot = { username: prevConfig.bot.username };
-    }
-    info("Existing credentials found for account 'main'.");
-    const answer = await prompt("Re-run setup? (y/N)", "N");
-    if (answer.toLowerCase() !== "y") {
-      info("Aborted.");
-      process.exit(0);
-    }
-  }
-
   heading(1, "Rocket.Chat Connection");
   const rcUrl = await prompt("Rocket.Chat URL", "http://localhost:3000");
   const adminUser = await prompt("Admin username");
-  const adminPass = await prompt("Admin password");
+  const adminPass = await promptPassword("Admin password");
 
   info("Logging in...");
   let adminAuth: RCLoginResult;
@@ -72,7 +102,7 @@ async function main() {
   if (!botUsername) { fail("Bot username is required"); process.exit(1); }
   const botName = await prompt("Bot display name", botUsername);
   const botEmail = await prompt("Bot email", `${botUsername.toLowerCase()}@openclaw.local`);
-  const botPassword = await prompt("Bot password");
+  const botPassword = await promptPassword("Bot password");
 
   if (!botPassword) { fail("Password is required"); process.exit(1); }
 
@@ -111,20 +141,13 @@ async function main() {
   try {
     info("Creating DM channel...");
     dmRoomId = await createDirectMessage(rcUrl, adminAuth, botUsername);
-    await sendMessage(rcUrl, botAuth, dmRoomId, "OpenClaw is connected! Send me a message to get started.");
+    await sendMessage(rcUrl, botAuth, dmRoomId, "OpenClaw is connected! Restart OpenClaw (openclaw restart) then send me a message to start chatting.");
     ok(`Welcome message sent to @${botUsername}`);
   } catch (e: any) {
     info(`Welcome message skipped: ${e.message}`);
   }
 
   heading(4, "Save & Configure");
-  await store.write("main", {
-    accountId: "main",
-    auth: { mode: "token", userId: botAuth.userId, accessToken: botAuth.authToken },
-    bot: { username: botUsername, userId: botUser._id },
-    createdAt: new Date().toISOString(),
-  });
-  ok("Saved credentials to ~/.openclaw/credentials/rocketchat/main.json");
 
   try {
     updateConfig({
@@ -142,9 +165,8 @@ async function main() {
   }
 
   console.log(`\n\u2500\u2500 Done! \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
-  console.log(`
-  Next steps:
-    1. Restart OpenClaw:   openclaw restart
+  console.log(`\n  Next steps:
+    1. Restart OpenClaw to activate the new bot:   openclaw restart
     2. Message @${botUsername} in Rocket.Chat
   `);
 }
