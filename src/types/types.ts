@@ -1,6 +1,18 @@
 import type { PluginAccountConfig } from "../config.js";
 export type { PluginConfig, PluginAccountConfig } from "../config.js";
 
+export type InboundAttachmentKind = "image" | "audio" | "document" | "video" | "unknown";
+
+export type InboundAttachment = {
+  kind: InboundAttachmentKind;
+  mimeType?: string;
+  fileName?: string;
+  url?: string;
+  sizeBytes?: number;
+  source: "rocketchat-attachment" | "rocketchat-file";
+  raw: unknown;
+};
+
 export type RocketChatIdentity = {
   userId: string;
   authToken: string;
@@ -34,6 +46,9 @@ export type RocketChatMessageRecord = {
     username?: string;
     name?: string;
   }>;
+  attachments?: unknown[];
+  file?: unknown;
+  files?: unknown[];
 };
 
 export type RocketChatClientOptions = {
@@ -72,6 +87,7 @@ export type InboundEvent = {
   senderName: string;
   text: string;
   mentions: string[];
+  attachments: InboundAttachment[];
   sentAt: string;
   raw: RocketChatMessageRecord;
 };
@@ -105,6 +121,7 @@ export type OutboundReplyPayload = {
   text?: string;
   mediaUrl?: string;
   mediaUrls?: string[];
+  attachmentPath?: string;
   replyToId?: string;
 };
 
@@ -197,6 +214,23 @@ export type RCUser = {
   _id: string;
   username: string;
   name: string;
+};
+
+export type AttachmentRecord = {
+  _id?: string;
+  title?: string;
+  title_link?: string;
+  url?: string;
+  image_url?: string;
+  video_url?: string;
+  audio_url?: string;
+  type?: string;
+  mimeType?: string;
+  mimetype?: string;
+  contentType?: string;
+  name?: string;
+  filename?: string;
+  size?: number;
 };
 
 

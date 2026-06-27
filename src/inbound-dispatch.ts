@@ -1,4 +1,5 @@
-import type { InboundEvent, OpenClawConfigLike, OutboundReplyPayload, ReplyDeliverInfo, ChannelRuntimeLike } from "./types/types.js";
+import type { InboundEvent, OpenClawConfigLike, OutboundReplyPayload, ReplyDeliverInfo, ChannelRuntimeLike, InboundAttachment } from "./types/types.js";
+import type { RocketChatClient } from "./client.js";
 
 export async function dispatchInboundEventWithChannelRuntime(params: {
   cfg: OpenClawConfigLike;
@@ -8,6 +9,7 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
   deliver(payload: OutboundReplyPayload, info: ReplyDeliverInfo): Promise<void>;
   onRecordError(err: unknown): void;
   onDispatchError(err: unknown, info: ReplyDeliverInfo): void;
+  client?: RocketChatClient;
 }): Promise<void> {
   const route = params.channelRuntime.routing.resolveAgentRoute({
     cfg: params.cfg,
@@ -62,6 +64,7 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     Timestamp: timestamp,
     OriginatingChannel: "rocketchat",
     OriginatingTo: to,
+    ...(await buildMediaContext(params.event.attachments, params.client)),
   });
 
   await params.channelRuntime.session.recordInboundSession({
@@ -95,18 +98,20 @@ function normalizeOutboundReplyPayload(payload: unknown): OutboundReplyPayload {
   }
 
   const record = payload as Record<string, unknown>;
-  const mediaUrls = Array.isArray(record.mediaUrls)
-    ? record.mediaUrls.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
-    : undefined;
 
   const text = typeof record.text === "string" ? record.text : undefined;
   const mediaUrl = typeof record.mediaUrl === "string" ? record.mediaUrl : undefined;
+  const mediaUrls = Array.isArray(record.mediaUrls)
+    ? record.mediaUrls.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : undefined;
+  const attachmentPath = typeof record.attachmentPath === "string" ? record.attachmentPath : undefined;
   const replyToId = typeof record.replyToId === "string" ? record.replyToId : undefined;
 
   return {
     ...(text ? { text } : {}),
     ...(mediaUrl ? { mediaUrl } : {}),
     ...(mediaUrls && mediaUrls.length > 0 ? { mediaUrls } : {}),
+    ...(attachmentPath ? { attachmentPath } : {}),
     ...(replyToId ? { replyToId } : {}),
   };
 }
@@ -124,6 +129,59 @@ function buildSenderAddress(event: InboundEvent): string {
 
 function buildRecipientAddress(event: InboundEvent): string {
   return `rocketchat:${event.roomId}`;
+}
+
+async function buildMediaContext(
+  attachments: InboundAttachment[],
+  client?: RocketChatClient,
+): Promise<Record<string, unknown>> {
+  if (attachments.length === 0) return {};
+
+  const mediaUrls: string[] = [];
+  const mediaPaths: string[] = [];
+  const mediaTypes: string[] = [];
+
+  for (const attachment of attachments) {
+    if (attachment.source === "rocketchat-file" && attachment.url && client && isPrivateUrl(attachment.url)) {
+      try {
+        const filePath = await client.downloadAttachmentToTempFile(attachment.url, attachment.fileName ? { fileName: attachment.fileName } : undefined);
+        mediaPaths.push(filePath);
+        if (attachment.mimeType) mediaTypes.push(attachment.mimeType);
+        continue;
+      } catch {
+        // download failed — fall through to URL injection
+      }
+    }
+
+    if (attachment.url) {
+      mediaUrls.push(attachment.url);
+      if (attachment.mimeType) mediaTypes.push(attachment.mimeType);
+    }
+  }
+
+  return {
+    ...(mediaUrls.length > 0 ? { MediaUrl: mediaUrls[0], MediaUrls: mediaUrls } : {}),
+    ...(mediaPaths.length > 0 ? { MediaPath: mediaPaths[0], MediaPaths: mediaPaths } : {}),
+    ...(mediaTypes.length > 0 ? { MediaType: mediaTypes[0], MediaTypes: mediaTypes } : {}),
+  };
+}
+
+function isPrivateUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname.endsWith(".local") ||
+      hostname.startsWith("10.") ||
+      hostname.startsWith("192.168.") ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
+      hostname.endsWith(".internal")
+    );
+  } catch {
+    return true; // unparseable URLs — treat as private, download
+  }
 }
 
 function toEpochMs(value: string): number | undefined {

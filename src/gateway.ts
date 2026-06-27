@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { RocketChatClient, RocketChatRateLimitError } from "./client.js";
 import { parsePluginConfig } from "./config.js";
 import { FileCheckpointStore } from "./checkpoint-store.js";
+import { getMessageAttachmentInputs, normalizeInboundAttachments } from "./attachments.js";
 import type { InboundEvent } from "./types/types.js";
 import { shouldHandleInboundEvent } from "./channel.js";
 import { dispatchInboundEventWithChannelRuntime } from "./inbound-dispatch.js";
@@ -115,7 +116,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
             continue;
           }
 
-          const event = toInboundEvent(account.accountId, sub, msg);
+          const event = toInboundEvent(account.accountId, sub, msg, account.serverUrl);
 
           if (!shouldHandleInboundEvent(event, { botUserId: identity.userId, mentionNames })) {
             continue;
@@ -141,10 +142,20 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
               accountId: account.accountId,
               event,
               channelRuntime,
+              client,
               deliver: async (payload, info) => {
                 if (info.kind === "final") {
                   await client.reactToMessage(event.messageId, ":white_check_mark:").catch((err) => log.error(`[rocketchat:${account.accountId}] reaction failed: ${err instanceof Error ? err.message : String(err)}`));
-                  await client.postMessage(event.roomId, payload.text ?? "", replyTmid ? { tmid: replyTmid } : undefined);
+                  if (payload.attachmentPath) {
+                    try {
+                      await client.uploadAttachment(event.roomId, payload.attachmentPath, payload.text, replyTmid ? { tmid: replyTmid } : undefined);
+                    } catch (err) {
+                      log.error(`[rocketchat:${account.accountId}] upload failed: ${err instanceof Error ? err.message : String(err)}`);
+                      await client.postMessage(event.roomId, payload.text ?? "", replyTmid ? { tmid: replyTmid } : undefined);
+                    }
+                  } else {
+                    await client.postMessage(event.roomId, payload.text ?? "", replyTmid ? { tmid: replyTmid } : undefined);
+                  }
                 }
               },
               onRecordError: (error) => {
@@ -240,7 +251,7 @@ function shouldSkipMessage(
 ): boolean {
   if (!msg._id) return true;
   if (msg.t) return true;
-  if ((!msg.msg || msg.msg.trim().length === 0)) return true;
+  if ((!msg.msg || msg.msg.trim().length === 0) && getMessageAttachmentInputs(msg).length === 0) return true;
   if (msg.u?._id === botUserId) return true;
   if (seenIds.has(msg._id)) return true;
   return false;
@@ -250,6 +261,7 @@ function toInboundEvent(
   accountId: string,
   sub: import("./types/types.js").RocketChatSubscriptionRecord,
   msg: import("./types/types.js").RocketChatMessageRecord,
+  serverUrl?: string,
 ): InboundEvent {
   return {
     accountId,
@@ -261,6 +273,7 @@ function toInboundEvent(
     senderName: msg.u?.username ?? msg.u?.name ?? "",
     text: msg.msg ?? "",
     mentions: (msg.mentions ?? []).map((m) => m.username ?? m.name ?? "").filter(Boolean),
+    attachments: normalizeInboundAttachments(getMessageAttachmentInputs(msg), serverUrl ? { serverUrl } : undefined),
     sentAt: msg.ts ?? new Date(0).toISOString(),
     raw: msg,
   };

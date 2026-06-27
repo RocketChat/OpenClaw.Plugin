@@ -1,19 +1,19 @@
 import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
-/** Config updater only writes token auth (CLI setup always resolves to a token) */
-type TokenAuth = { mode: "token"; userId: string; accessToken: string };
+import type { AuthCredentials, JsonObject } from "../types/types.js";
 
 const OC_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
 
-type OcConfig = Record<string, unknown>;
+/** Config updater only writes token auth (CLI setup always resolves to a token) */
+type TokenAuth = Extract<AuthCredentials, { mode: "token" }>;
 
-function readConfig(): OcConfig {
+function readConfig(): JsonObject {
   if (!existsSync(OC_CONFIG_PATH)) return {};
   return JSON.parse(readFileSync(OC_CONFIG_PATH, "utf-8"));
 }
 
-function writeConfig(cfg: OcConfig): void {
+function writeConfig(cfg: JsonObject): void {
   const tmp = OC_CONFIG_PATH + ".tmp";
   writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", "utf-8");
   renameSync(tmp, OC_CONFIG_PATH);
@@ -55,4 +55,3 @@ export function updateConfig(opts: {
 
   writeConfig(cfg);
 }
-

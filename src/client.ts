@@ -1,3 +1,8 @@
+import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { join, basename } from "node:path";
+import { homedir } from "node:os";
+import { randomUUID } from "node:crypto";
+
 import type {
   PluginAccountConfig,
   RocketChatIdentity,
@@ -28,6 +33,7 @@ export class RocketChatClient {
   private readonly serverUrl: string;
   private readonly auth: PluginAccountConfig["auth"];
   private readonly fetchFn: typeof fetch;
+  private readonly mediaDir: string;
   private identity: RocketChatIdentity | null = null;
   private resolvedUserId: string | null = null;
   private resolvedAuthToken: string | null = null;
@@ -36,6 +42,7 @@ export class RocketChatClient {
     this.serverUrl = options.serverUrl.replace(/\/+$/, "");
     this.auth = options.auth;
     this.fetchFn = options.fetch ?? globalThis.fetch;
+    this.mediaDir = resolveMediaDir();
 
     if (this.auth.mode === "token") {
       this.resolvedUserId = this.auth.userId;
@@ -122,6 +129,84 @@ export class RocketChatClient {
       method: "POST",
       body: JSON.stringify({ messageId, reaction }),
     });
+  }
+
+  async downloadAttachmentToTempFile(
+    url: string,
+    options?: { fileName?: string },
+  ): Promise<string> {
+    await this.ensureInitialized();
+    const requestUrl = resolveUrl_relative(url, this.serverUrl);
+    const response = await this.fetchFn(requestUrl, {
+      method: "GET",
+      headers: {
+        Accept: "*/*",
+        "X-User-Id": this.resolvedUserId!,
+        "X-Auth-Token": this.resolvedAuthToken!,
+      },
+    });
+    if (!response.ok) {
+      throw new RocketChatClientError(`attachment download failed: ${response.statusText}`);
+    }
+    const inboundDir = join(this.mediaDir, "inbound");
+    await mkdir(inboundDir, { recursive: true });
+    const ext = guessExt(url, options?.fileName);
+    const safeName = (options?.fileName ?? "attachment").replace(/[^a-zA-Z0-9._-]/g, "_");
+    const filePath = join(inboundDir, `${safeName}---${randomUUID().slice(0, 12)}${ext ? `.${ext}` : ""}`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    await writeFile(filePath, bytes);
+    return filePath;
+  }
+
+  async uploadAttachment(
+    roomId: string,
+    filePath: string,
+    text?: string,
+    options?: { tmid?: string },
+  ): Promise<string> {
+    await this.ensureInitialized();
+    const fileName = basename(filePath);
+    const fileBytes = await readFile(filePath);
+    const formData = new FormData();
+    if (text?.trim()) formData.append("msg", text.trim());
+    if (options?.tmid) formData.append("tmid", options.tmid);
+    formData.append("file", new Blob([fileBytes]), fileName);
+    const uploadResponse = await this.fetchFn(
+      new URL(`/api/v1/rooms.media/${encodeURIComponent(roomId)}`, this.serverUrl).toString(),
+      {
+        method: "POST",
+        headers: {
+          "X-User-Id": this.resolvedUserId!,
+          "X-Auth-Token": this.resolvedAuthToken!,
+        },
+        body: formData,
+      },
+    );
+    if (!uploadResponse.ok) {
+      throw new RocketChatClientError(`attachment upload failed: ${uploadResponse.statusText}`);
+    }
+    const uploadPayload = await this.parseJsonResponse(uploadResponse);
+    const file = asObject(uploadPayload.file ?? {});
+    const fileId = getString(file, "_id");
+    const confirmResponse = await this.fetchFn(
+      new URL(
+        `/api/v1/rooms.mediaConfirm/${encodeURIComponent(roomId)}/${encodeURIComponent(fileId)}`,
+        this.serverUrl,
+      ).toString(),
+      {
+        method: "POST",
+        headers: {
+          "X-User-Id": this.resolvedUserId!,
+          "X-Auth-Token": this.resolvedAuthToken!,
+        },
+      },
+    );
+    if (!confirmResponse.ok) {
+      throw new RocketChatClientError(`attachment confirm failed: ${confirmResponse.statusText}`);
+    }
+    const confirmPayload = await this.parseJsonResponse(confirmResponse);
+    const message = asObject(confirmPayload.message ?? {});
+    return getString(message, "_id");
   }
 
   private async ensureInitialized(): Promise<void> {
@@ -228,5 +313,27 @@ function getRetryAfterMs(response: Response, payload: JsonObject): number {
   }
 
   return 30_000;
+}
+
+function resolveMediaDir(): string {
+  const explicit = process.env.OPENCLAW_STATE_DIR?.trim();
+  if (explicit) return join(explicit, "media");
+  const home = process.env.OPENCLAW_HOME?.trim();
+  if (home) return join(home, ".openclaw", "media");
+  return join(homedir(), ".openclaw", "media");
+}
+
+function resolveUrl_relative(url: string, base: string | undefined): string {
+  try { return new URL(url).toString(); } catch { /* relative */ }
+  if (!base) return url;
+  try { return new URL(url, base.endsWith("/") ? base : base + "/").toString(); } catch { return url; }
+}
+
+function guessExt(url: string | undefined, fileName: string | undefined): string | undefined {
+  const name = fileName || url || "";
+  const parts = name.split(".");
+  if (parts.length < 2) return undefined;
+  const ext = parts.pop()!.split("?").shift()!.split("#").shift()!.toLowerCase();
+  return ext || undefined;
 }
 
