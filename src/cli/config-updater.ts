@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
-/** Config updater only writes token auth (CLI setup always resolves to a token) */
+
 type TokenAuth = { mode: "token"; userId: string; accessToken: string };
 
 const OC_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
