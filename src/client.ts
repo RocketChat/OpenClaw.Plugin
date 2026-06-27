@@ -26,29 +26,54 @@ export class RocketChatRateLimitError extends RocketChatClientError {
 
 export class RocketChatClient {
   private readonly serverUrl: string;
-  private readonly userId: string;
-  private readonly accessToken: string;
+  private readonly auth: PluginAccountConfig["auth"];
   private readonly fetchFn: typeof fetch;
+  private identity: RocketChatIdentity | null = null;
+  private resolvedUserId: string | null = null;
+  private resolvedAuthToken: string | null = null;
 
   constructor(options: RocketChatClientOptions) {
-    if (options.auth.mode !== "token") {
-      throw new RocketChatClientError("only token auth is supported");
-    }
     this.serverUrl = options.serverUrl.replace(/\/+$/, "");
-    this.userId = options.auth.userId;
-    this.accessToken = options.auth.accessToken;
+    this.auth = options.auth;
     this.fetchFn = options.fetch ?? globalThis.fetch;
+
+    if (this.auth.mode === "token") {
+      this.resolvedUserId = this.auth.userId;
+      this.resolvedAuthToken = this.auth.accessToken;
+    }
+  }
+
+  async initialize(): Promise<void> {
+    if (this.resolvedUserId && this.resolvedAuthToken) return;
+    if (this.auth.mode !== "password") {
+      throw new RocketChatClientError("cannot initialize: no credentials available");
+    }
+    const response = await this.fetchFn(new URL("/api/v1/login", this.serverUrl), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ user: this.auth.username, password: this.auth.password }),
+    });
+    if (!response.ok) {
+      throw new RocketChatClientError(`login failed: ${response.statusText}`);
+    }
+    const payload = await response.json() as JsonObject;
+    const data = asObject(payload.data);
+    this.resolvedUserId = getString(data, "userId");
+    this.resolvedAuthToken = getString(data, "authToken");
   }
 
   async getIdentity(): Promise<RocketChatIdentity> {
+    if (this.identity) return this.identity;
+    await this.ensureInitialized();
     const payload = await this.requestJson(new URL("/api/v1/me", this.serverUrl), { method: "GET" });
     const user = asObject(payload.user ?? payload.me ?? payload);
-    return {
-      userId: this.userId,
-      authToken: this.accessToken,
+    this.identity = {
+      userId: this.resolvedUserId!,
+      authToken: this.resolvedAuthToken!,
       username: getString(user, "username"),
       displayName: getOptionalString(user, "name") ?? getString(user, "username"),
     };
+    return this.identity;
   }
 
   async listSubscriptions(updatedSince: string | null): Promise<RocketChatSubscriptionRecord[]> {
@@ -99,7 +124,14 @@ export class RocketChatClient {
     });
   }
 
+  private async ensureInitialized(): Promise<void> {
+    if (!this.resolvedUserId || !this.resolvedAuthToken) {
+      await this.initialize();
+    }
+  }
+
   private async requestJson(url: URL, init: RequestInit): Promise<JsonObject> {
+    await this.ensureInitialized();
     const signal = init.signal ?? AbortSignal.timeout(15_000);
     const response = await this.fetchFn(url.toString(), {
       ...init,
@@ -107,8 +139,8 @@ export class RocketChatClient {
       headers: {
         "Content-Type": "application/json",
         Accept: "application/json",
-        "X-User-Id": this.userId,
-        "X-Auth-Token": this.accessToken,
+        "X-User-Id": this.resolvedUserId!,
+        "X-Auth-Token": this.resolvedAuthToken!,
         ...(init.headers as Record<string, string> ?? {}),
       },
     });

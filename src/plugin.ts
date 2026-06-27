@@ -1,5 +1,4 @@
 import { RocketChatClient } from "./client.js";
-import * as store from "./cli/credential-store.js";
 import { startGateway, resolveAccount, listAccountIds, isConfigured, activeClients } from "./gateway.js";
 import type { OpenClawConfig } from "./types/types.js";
 
@@ -66,9 +65,7 @@ export const rocketchatPlugin = {
       const entry = activeClients.get(account.accountId);
       let client = entry?.client ?? null;
       if (!client) {
-        const stored = await store.read(account.accountId).catch(() => null);
-        const auth = stored?.auth ?? account.auth as { mode: "token"; userId: string; accessToken: string };
-        client = new RocketChatClient({ serverUrl: account.serverUrl, auth });
+        client = new RocketChatClient({ serverUrl: account.serverUrl, auth: account.auth });
       }
       const tmidOptions = params.replyToId ? { tmid: params.replyToId } : undefined;
       const messageId = await client.postMessage(params.to, params.text, tmidOptions);

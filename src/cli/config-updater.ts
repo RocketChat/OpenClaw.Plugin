@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
-import type { AuthCredentials } from "../types/types.js";
+
+type TokenAuth = { mode: "token"; userId: string; accessToken: string };
 
 const OC_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
 
@@ -25,7 +26,7 @@ export function updateConfig(opts: {
   serverUrl: string;
   transport?: { mode: string };
   mentionNames?: string[];
-  auth: AuthCredentials;
+  auth: TokenAuth;
 }) {
   const cfg = readConfig() as Record<string, any>;
 

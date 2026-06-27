@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { RocketChatClient, RocketChatRateLimitError } from "./client.js";
 import { parsePluginConfig } from "./config.js";
 import { FileCheckpointStore } from "./checkpoint-store.js";
-import * as store from "./cli/credential-store.js";
 import type { InboundEvent } from "./types/types.js";
 import { shouldHandleInboundEvent } from "./channel.js";
 import { dispatchInboundEventWithChannelRuntime } from "./inbound-dispatch.js";
@@ -37,7 +36,6 @@ export function listAccountIds(cfg: OpenClawConfig): string[] {
 
 export function isConfigured(account: Partial<ResolvedAccount> | null | undefined): boolean {
   if (!account?.serverUrl) return false;
-  if (account.accountId && store.exists(account.accountId)) return true;
   return Boolean(account.auth);
 }
 
@@ -49,8 +47,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
   }
 
   const log = logger;
-  const stored = await store.read(account.accountId).catch(() => null);
-  const auth = stored?.auth ?? account.auth as { mode: "token"; userId: string; accessToken: string };
+  const auth = account.auth;
   const client = new RocketChatClient({
     serverUrl: account.serverUrl,
     auth,
@@ -139,7 +136,7 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
               PROCESSING_EMOJIS[Math.floor(Math.random() * PROCESSING_EMOJIS.length)]!
             ).catch((err) => log.error(`[rocketchat:${account.accountId}] reaction failed: ${err instanceof Error ? err.message : String(err)}`));
 
-            dispatchInboundEventWithChannelRuntime({
+            await dispatchInboundEventWithChannelRuntime({
               cfg: (ctx.cfg ?? {}) as OpenClawConfigLike,
               accountId: account.accountId,
               event,
@@ -160,8 +157,6 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
                   `[rocketchat:${account.accountId}] ${info.kind} dispatch failed: ${error instanceof Error ? error.message : String(error)}`,
                 );
               },
-            }).catch((err) => {
-              log.error(`[rocketchat:${account.accountId}] inbound dispatch error: ${err instanceof Error ? err.message : String(err)}`);
             });
           } else {
             if (!warnedAboutMissingRuntime) {
