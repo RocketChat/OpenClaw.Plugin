@@ -142,7 +142,7 @@ async function buildMediaContext(
   const mediaTypes: string[] = [];
 
   for (const attachment of attachments) {
-    if (attachment.source === "rocketchat-file" && attachment.url && client && isPrivateUrl(attachment.url)) {
+    if (attachment.url && client) {
       try {
         const filePath = await client.downloadAttachmentToTempFile(attachment.url, attachment.fileName ? { fileName: attachment.fileName } : undefined);
         mediaPaths.push(filePath);
@@ -164,24 +164,6 @@ async function buildMediaContext(
     ...(mediaPaths.length > 0 ? { MediaPath: mediaPaths[0], MediaPaths: mediaPaths } : {}),
     ...(mediaTypes.length > 0 ? { MediaType: mediaTypes[0], MediaTypes: mediaTypes } : {}),
   };
-}
-
-function isPrivateUrl(url: string): boolean {
-  try {
-    const hostname = new URL(url).hostname.toLowerCase();
-    return (
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      hostname === "::1" ||
-      hostname.endsWith(".local") ||
-      hostname.startsWith("10.") ||
-      hostname.startsWith("192.168.") ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
-      hostname.endsWith(".internal")
-    );
-  } catch {
-    return true; // unparseable URLs — treat as private, download
-  }
 }
 
 function toEpochMs(value: string): number | undefined {
