@@ -137,26 +137,37 @@ async function buildMediaContext(
 ): Promise<Record<string, unknown>> {
   if (attachments.length === 0) return {};
 
+  const results = await Promise.all(
+    attachments.map(async (attachment) => {
+      if (attachment.url && client) {
+        try {
+          const filePath = await client.downloadAttachmentToTempFile(attachment.url, attachment.fileName ? { fileName: attachment.fileName } : undefined);
+          return { kind: "path" as const, value: filePath, mimeType: attachment.mimeType };
+        } catch {
+          // download failed — fall through to URL injection
+        }
+      }
+
+      if (attachment.url) {
+        return { kind: "url" as const, value: attachment.url, mimeType: attachment.mimeType };
+      }
+
+      return null;
+    }),
+  );
+
   const mediaUrls: string[] = [];
   const mediaPaths: string[] = [];
   const mediaTypes: string[] = [];
 
-  for (const attachment of attachments) {
-    if (attachment.url && client) {
-      try {
-        const filePath = await client.downloadAttachmentToTempFile(attachment.url, attachment.fileName ? { fileName: attachment.fileName } : undefined);
-        mediaPaths.push(filePath);
-        if (attachment.mimeType) mediaTypes.push(attachment.mimeType);
-        continue;
-      } catch {
-        // download failed — fall through to URL injection
-      }
+  for (const r of results) {
+    if (!r) continue;
+    if (r.kind === "path") {
+      mediaPaths.push(r.value);
+    } else {
+      mediaUrls.push(r.value);
     }
-
-    if (attachment.url) {
-      mediaUrls.push(attachment.url);
-      if (attachment.mimeType) mediaTypes.push(attachment.mimeType);
-    }
+    if (r.mimeType) mediaTypes.push(r.mimeType);
   }
 
   return {

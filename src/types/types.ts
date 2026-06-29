@@ -92,14 +92,7 @@ export type InboundEvent = {
   raw: RocketChatMessageRecord;
 };
 
-export type OpenClawConfigLike = {
-  session?: {
-    store?: string;
-  };
-  channels?: {
-    rocketchat?: unknown;
-  };
-};
+export type OpenClawConfigLike = OpenClawConfig;
 
 export type RoutePeer = {
   kind: InboundEvent["roomType"];

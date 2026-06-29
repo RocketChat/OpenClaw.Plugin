@@ -1,3 +1,4 @@
+import { resolveUrl, getExt } from "./utils.js";
 import type { InboundAttachment, InboundAttachmentKind, AttachmentRecord } from "./types/types.js";
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "tif"]);
@@ -103,16 +104,4 @@ function classify(mimeType: string | undefined, fileName: string | undefined): I
   return "unknown";
 }
 
-function getExt(fileName: string | undefined): string | undefined {
-  if (!fileName) return undefined;
-  const clean = fileName.trim().toLowerCase();
-  const dot = clean.lastIndexOf(".");
-  if (dot <= 0 || dot === clean.length - 1) return undefined;
-  return clean.slice(dot + 1);
-}
 
-function resolveUrl(url: string, serverUrl: string | undefined): string {
-  try { return new URL(url).toString(); } catch { /* relative */ }
-  if (!serverUrl) return url;
-  try { return new URL(url, serverUrl).toString(); } catch { return url; }
-}

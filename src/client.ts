@@ -1,7 +1,8 @@
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join, basename } from "node:path";
-import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
+
+import { resolveOpenClawDir, resolveUrl, getExt, getErrorMessage } from "./utils.js";
 
 import type {
   PluginAccountConfig,
@@ -42,7 +43,7 @@ export class RocketChatClient {
     this.serverUrl = options.serverUrl.replace(/\/+$/, "");
     this.auth = options.auth;
     this.fetchFn = options.fetch ?? globalThis.fetch;
-    this.mediaDir = resolveMediaDir();
+    this.mediaDir = join(resolveOpenClawDir(), "media");
 
     if (this.auth.mode === "token") {
       this.resolvedUserId = this.auth.userId;
@@ -136,7 +137,7 @@ export class RocketChatClient {
     options?: { fileName?: string },
   ): Promise<string> {
     await this.ensureInitialized();
-    const requestUrl = resolveUrl_relative(url, this.serverUrl);
+    const requestUrl = resolveUrl(url, this.serverUrl);
     const response = await this.fetchFn(requestUrl, {
       method: "GET",
       headers: {
@@ -150,7 +151,7 @@ export class RocketChatClient {
     }
     const inboundDir = join(this.mediaDir, "inbound");
     await mkdir(inboundDir, { recursive: true });
-    const ext = guessExt(url, options?.fileName);
+    const ext = getExt(options?.fileName ?? url ?? "attachment");
     const safeName = (options?.fileName ?? "attachment").replace(/[^a-zA-Z0-9._-]/g, "_");
     const filePath = join(inboundDir, `${safeName}---${randomUUID().slice(0, 12)}${ext ? `.${ext}` : ""}`);
     const bytes = Buffer.from(await response.arrayBuffer());
@@ -235,8 +236,10 @@ export class RocketChatClient {
   private async parseJsonResponse(response: Response): Promise<JsonObject> {
     let payload: JsonObject;
     try {
-      payload = (await response.json()) as JsonObject;
+      const parsed = await response.json();
+      payload = asObject(parsed);
     } catch (err) {
+      if (err instanceof RocketChatClientError) throw err;
       throw new RocketChatClientError(
         `Rocket.Chat API returned non-JSON response (status ${response.status}): ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -282,18 +285,6 @@ function getOptionalString(object: JsonObject, key: string): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function getErrorMessage(payload: JsonObject, fallback: string): string {
-  if (typeof payload.error === "string" && payload.error.length > 0) {
-    return payload.error;
-  }
-
-  if (typeof payload.message === "string" && payload.message.length > 0) {
-    return payload.message;
-  }
-
-  return fallback;
-}
-
 function getRetryAfterMs(response: Response, payload: JsonObject): number {
   const retryAfterHeader = response.headers.get("Retry-After");
   if (retryAfterHeader) {
@@ -315,25 +306,5 @@ function getRetryAfterMs(response: Response, payload: JsonObject): number {
   return 30_000;
 }
 
-function resolveMediaDir(): string {
-  const explicit = process.env.OPENCLAW_STATE_DIR?.trim();
-  if (explicit) return join(explicit, "media");
-  const home = process.env.OPENCLAW_HOME?.trim();
-  if (home) return join(home, ".openclaw", "media");
-  return join(homedir(), ".openclaw", "media");
-}
 
-function resolveUrl_relative(url: string, base: string | undefined): string {
-  try { return new URL(url).toString(); } catch { /* relative */ }
-  if (!base) return url;
-  try { return new URL(url, base.endsWith("/") ? base : base + "/").toString(); } catch { return url; }
-}
-
-function guessExt(url: string | undefined, fileName: string | undefined): string | undefined {
-  const name = fileName || url || "";
-  const parts = name.split(".");
-  if (parts.length < 2) return undefined;
-  const ext = parts.pop()!.split("?").shift()!.split("#").shift()!.toLowerCase();
-  return ext || undefined;
-}
 
