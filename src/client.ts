@@ -4,6 +4,9 @@ import { randomUUID } from "node:crypto";
 
 import { resolveOpenClawDir, resolveUrl, getExt, getErrorMessage } from "./utils.js";
 
+const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
+const ALLOWED_DOWNLOAD_MIME_PREFIXES = ["image/"];
+
 import type {
   PluginAccountConfig,
   RocketChatIdentity,
@@ -138,6 +141,9 @@ export class RocketChatClient {
   ): Promise<string> {
     await this.ensureInitialized();
     const requestUrl = resolveUrl(url, this.serverUrl);
+    if (isBlockedUrl(requestUrl)) {
+      throw new RocketChatClientError(`attachment download blocked: ${requestUrl} resolves to a private/internal address`);
+    }
     const response = await this.fetchFn(requestUrl, {
       method: "GET",
       headers: {
@@ -149,12 +155,33 @@ export class RocketChatClient {
     if (!response.ok) {
       throw new RocketChatClientError(`attachment download failed: ${response.statusText}`);
     }
+    const contentTypeHeader = response.headers.get("Content-Type");
+    const rawContentType = (contentTypeHeader ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+    if (!rawContentType || !ALLOWED_DOWNLOAD_MIME_PREFIXES.some((p) => rawContentType.startsWith(p))) {
+      throw new RocketChatClientError(
+        `attachment download refused: unsupported content type "${contentTypeHeader ?? ""}"`,
+      );
+    }
+    const contentLength = response.headers.get("Content-Length");
+    if (contentLength) {
+      const bytes = Number.parseInt(contentLength, 10);
+      if (!Number.isNaN(bytes) && bytes > MAX_DOWNLOAD_BYTES) {
+        throw new RocketChatClientError(
+          `attachment download refused: Content-Length ${bytes} exceeds max ${MAX_DOWNLOAD_BYTES}`,
+        );
+      }
+    }
     const inboundDir = join(this.mediaDir, "inbound");
     await mkdir(inboundDir, { recursive: true });
     const ext = getExt(options?.fileName ?? url ?? "attachment");
     const safeName = (options?.fileName ?? "attachment").replace(/[^a-zA-Z0-9._-]/g, "_");
     const filePath = join(inboundDir, `${safeName}---${randomUUID().slice(0, 12)}${ext ? `.${ext}` : ""}`);
     const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length > MAX_DOWNLOAD_BYTES) {
+      throw new RocketChatClientError(
+        `attachment download refused: actual size ${bytes.length} exceeds max ${MAX_DOWNLOAD_BYTES}`,
+      );
+    }
     await writeFile(filePath, bytes);
     return filePath;
   }
@@ -260,6 +287,29 @@ export class RocketChatClient {
     }
 
     return payload;
+  }
+}
+
+function isBlockedUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    if (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname === "0.0.0.0" ||
+      hostname.endsWith(".local") ||
+      hostname.endsWith(".internal") ||
+      hostname.startsWith("10.") ||
+      hostname.startsWith("192.168.") ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
+      /^169\.254\./.test(hostname)
+    ) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
   }
 }
 

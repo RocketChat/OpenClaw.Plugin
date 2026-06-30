@@ -1,5 +1,3 @@
-import { join } from "node:path";
-
 import { resolveOpenClawDir } from "./utils.js";
 import { RocketChatClient, RocketChatRateLimitError } from "./client.js";
 import { parsePluginConfig } from "./config.js";
@@ -17,6 +15,9 @@ import type {
   OutboundReplyPayload,
   ReplyDeliverInfo,
 } from "./types/types.js";
+
+const MAX_MESSAGE_LENGTH = 10_000;
+const MAX_ATTACHMENTS = 5;
 
 export type ClientEntry = { client: RocketChatClient; generation: number; wakeup: () => void };
 export const activeClients = new Map<string, ClientEntry>();
@@ -94,7 +95,6 @@ async function pollOnce(
   const subscriptions = await client.listSubscriptions(stateData.updatedSince);
   let nextUpdatedSince = stateData.updatedSince;
   let foundMessages = false;
-  let messagesSinceCheckpoint = 0;
 
   for (const sub of subscriptions) {
     const subTs = sub._updatedAt ?? sub.updatedAt ?? null;
@@ -124,16 +124,8 @@ async function pollOnce(
       }
 
       seenIds.add(msg._id);
-      messagesSinceCheckpoint++;
-      if (messagesSinceCheckpoint >= 5) {
-        await checkpoint.write({ updatedSince: nextUpdatedSince, recentMessageIds: [...seenIds].slice(-250) });
-        messagesSinceCheckpoint = 0;
-      }
+      await checkpoint.write({ updatedSince: nextUpdatedSince, recentMessageIds: [...seenIds].slice(-250) });
     }
-  }
-
-  if (messagesSinceCheckpoint > 0) {
-    await checkpoint.write({ updatedSince: nextUpdatedSince, recentMessageIds: [...seenIds].slice(-250) });
   }
 
   state.recordCycle(foundMessages);
@@ -307,6 +299,7 @@ function toInboundEvent(
   msg: import("./types/types.js").RocketChatMessageRecord,
   serverUrl?: string,
 ): InboundEvent {
+  const rawAttachments = getMessageAttachmentInputs(msg);
   return {
     accountId,
     roomId: msg.rid,
@@ -315,9 +308,9 @@ function toInboundEvent(
     tmid: msg.tmid ?? null,
     senderId: msg.u?._id ?? "",
     senderName: msg.u?.username ?? msg.u?.name ?? "",
-    text: msg.msg ?? "",
+    text: (msg.msg ?? "").slice(0, MAX_MESSAGE_LENGTH),
     mentions: (msg.mentions ?? []).map((m) => m.username ?? m.name ?? "").filter(Boolean),
-    attachments: normalizeInboundAttachments(getMessageAttachmentInputs(msg), serverUrl ? { serverUrl } : undefined),
+    attachments: normalizeInboundAttachments(rawAttachments.slice(0, MAX_ATTACHMENTS), serverUrl ? { serverUrl } : undefined),
     sentAt: msg.ts ?? new Date(0).toISOString(),
     raw: msg,
   };
