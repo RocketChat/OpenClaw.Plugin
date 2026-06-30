@@ -1,3 +1,12 @@
+import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { join, basename } from "node:path";
+import { randomUUID } from "node:crypto";
+
+import { resolveOpenClawDir, resolveUrl, getExt, getErrorMessage } from "./utils.js";
+
+const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
+const ALLOWED_DOWNLOAD_MIME_PREFIXES = ["image/"];
+
 import type {
   PluginAccountConfig,
   RocketChatIdentity,
@@ -28,6 +37,7 @@ export class RocketChatClient {
   private readonly serverUrl: string;
   private readonly auth: PluginAccountConfig["auth"];
   private readonly fetchFn: typeof fetch;
+  private readonly mediaDir: string;
   private identity: RocketChatIdentity | null = null;
   private resolvedUserId: string | null = null;
   private resolvedAuthToken: string | null = null;
@@ -36,6 +46,7 @@ export class RocketChatClient {
     this.serverUrl = options.serverUrl.replace(/\/+$/, "");
     this.auth = options.auth;
     this.fetchFn = options.fetch ?? globalThis.fetch;
+    this.mediaDir = join(resolveOpenClawDir(), "media");
 
     if (this.auth.mode === "token") {
       this.resolvedUserId = this.auth.userId;
@@ -124,6 +135,108 @@ export class RocketChatClient {
     });
   }
 
+  async downloadAttachmentToTempFile(
+    url: string,
+    options?: { fileName?: string },
+  ): Promise<string> {
+    await this.ensureInitialized();
+    const requestUrl = resolveUrl(url, this.serverUrl);
+    if (isBlockedUrl(requestUrl)) {
+      throw new RocketChatClientError(`attachment download blocked: ${requestUrl} resolves to a private/internal address`);
+    }
+    const response = await this.fetchFn(requestUrl, {
+      method: "GET",
+      headers: {
+        Accept: "*/*",
+        "X-User-Id": this.resolvedUserId!,
+        "X-Auth-Token": this.resolvedAuthToken!,
+      },
+    });
+    if (!response.ok) {
+      throw new RocketChatClientError(`attachment download failed: ${response.statusText}`);
+    }
+    const contentTypeHeader = response.headers.get("Content-Type");
+    const rawContentType = (contentTypeHeader ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+    if (!rawContentType || !ALLOWED_DOWNLOAD_MIME_PREFIXES.some((p) => rawContentType.startsWith(p))) {
+      throw new RocketChatClientError(
+        `attachment download refused: unsupported content type "${contentTypeHeader ?? ""}"`,
+      );
+    }
+    const contentLength = response.headers.get("Content-Length");
+    if (contentLength) {
+      const bytes = Number.parseInt(contentLength, 10);
+      if (!Number.isNaN(bytes) && bytes > MAX_DOWNLOAD_BYTES) {
+        throw new RocketChatClientError(
+          `attachment download refused: Content-Length ${bytes} exceeds max ${MAX_DOWNLOAD_BYTES}`,
+        );
+      }
+    }
+    const inboundDir = join(this.mediaDir, "inbound");
+    await mkdir(inboundDir, { recursive: true });
+    const ext = getExt(options?.fileName ?? url ?? "attachment");
+    const safeName = (options?.fileName ?? "attachment").replace(/[^a-zA-Z0-9._-]/g, "_");
+    const filePath = join(inboundDir, `${safeName}---${randomUUID().slice(0, 12)}${ext ? `.${ext}` : ""}`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length > MAX_DOWNLOAD_BYTES) {
+      throw new RocketChatClientError(
+        `attachment download refused: actual size ${bytes.length} exceeds max ${MAX_DOWNLOAD_BYTES}`,
+      );
+    }
+    await writeFile(filePath, bytes);
+    return filePath;
+  }
+
+  async uploadAttachment(
+    roomId: string,
+    filePath: string,
+    text?: string,
+    options?: { tmid?: string },
+  ): Promise<string> {
+    await this.ensureInitialized();
+    const fileName = basename(filePath);
+    const fileBytes = await readFile(filePath);
+    const formData = new FormData();
+    if (text?.trim()) formData.append("msg", text.trim());
+    if (options?.tmid) formData.append("tmid", options.tmid);
+    formData.append("file", new Blob([fileBytes]), fileName);
+    const uploadResponse = await this.fetchFn(
+      new URL(`/api/v1/rooms.media/${encodeURIComponent(roomId)}`, this.serverUrl).toString(),
+      {
+        method: "POST",
+        headers: {
+          "X-User-Id": this.resolvedUserId!,
+          "X-Auth-Token": this.resolvedAuthToken!,
+        },
+        body: formData,
+      },
+    );
+    if (!uploadResponse.ok) {
+      throw new RocketChatClientError(`attachment upload failed: ${uploadResponse.statusText}`);
+    }
+    const uploadPayload = await this.parseJsonResponse(uploadResponse);
+    const file = asObject(uploadPayload.file ?? {});
+    const fileId = getString(file, "_id");
+    const confirmResponse = await this.fetchFn(
+      new URL(
+        `/api/v1/rooms.mediaConfirm/${encodeURIComponent(roomId)}/${encodeURIComponent(fileId)}`,
+        this.serverUrl,
+      ).toString(),
+      {
+        method: "POST",
+        headers: {
+          "X-User-Id": this.resolvedUserId!,
+          "X-Auth-Token": this.resolvedAuthToken!,
+        },
+      },
+    );
+    if (!confirmResponse.ok) {
+      throw new RocketChatClientError(`attachment confirm failed: ${confirmResponse.statusText}`);
+    }
+    const confirmPayload = await this.parseJsonResponse(confirmResponse);
+    const message = asObject(confirmPayload.message ?? {});
+    return getString(message, "_id");
+  }
+
   private async ensureInitialized(): Promise<void> {
     if (!this.resolvedUserId || !this.resolvedAuthToken) {
       await this.initialize();
@@ -150,8 +263,10 @@ export class RocketChatClient {
   private async parseJsonResponse(response: Response): Promise<JsonObject> {
     let payload: JsonObject;
     try {
-      payload = (await response.json()) as JsonObject;
+      const parsed = await response.json();
+      payload = asObject(parsed);
     } catch (err) {
+      if (err instanceof RocketChatClientError) throw err;
       throw new RocketChatClientError(
         `Rocket.Chat API returned non-JSON response (status ${response.status}): ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -172,6 +287,29 @@ export class RocketChatClient {
     }
 
     return payload;
+  }
+}
+
+function isBlockedUrl(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    if (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "::1" ||
+      hostname === "0.0.0.0" ||
+      hostname.endsWith(".local") ||
+      hostname.endsWith(".internal") ||
+      hostname.startsWith("10.") ||
+      hostname.startsWith("192.168.") ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
+      /^169\.254\./.test(hostname)
+    ) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
   }
 }
 
@@ -197,18 +335,6 @@ function getOptionalString(object: JsonObject, key: string): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-function getErrorMessage(payload: JsonObject, fallback: string): string {
-  if (typeof payload.error === "string" && payload.error.length > 0) {
-    return payload.error;
-  }
-
-  if (typeof payload.message === "string" && payload.message.length > 0) {
-    return payload.message;
-  }
-
-  return fallback;
-}
-
 function getRetryAfterMs(response: Response, payload: JsonObject): number {
   const retryAfterHeader = response.headers.get("Retry-After");
   if (retryAfterHeader) {
@@ -229,4 +355,6 @@ function getRetryAfterMs(response: Response, payload: JsonObject): number {
 
   return 30_000;
 }
+
+
 
