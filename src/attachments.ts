@@ -33,7 +33,43 @@ export function getMessageAttachmentInputs(message: {
   const attachmentRecords = toRecords(message.attachments ?? []).filter(
     (r) => !hasId(r) || !fileIds.has(r._id),
   );
-  return [...fileRecords, ...attachmentRecords];
+
+  const hasUrl = (r: AttachmentRecord) =>
+    typeof r.url === "string" ||
+    typeof r.title_link === "string" ||
+    typeof r.image_url === "string" ||
+    typeof r.video_url === "string" ||
+    typeof r.audio_url === "string";
+
+  const merged: AttachmentRecord[] = [];
+  const paired = new Set<number>();
+
+  for (const fileRec of fileRecords) {
+    const matchIdx = attachmentRecords.findIndex((att, i) =>
+      !paired.has(i) && (
+        (fileRec._id && att._id && fileRec._id === att._id) ||
+        (!hasId(att) && hasUrl(att))
+      ),
+    );
+    if (matchIdx !== -1) {
+      paired.add(matchIdx);
+      const att = attachmentRecords[matchIdx]!;
+      const m = { ...att } as AttachmentRecord;
+      if (fileRec._id) m._id = fileRec._id;
+      if (fileRec.type) m.type = fileRec.type;
+      if (fileRec.name) m.name = fileRec.name;
+      if (typeof fileRec.size === "number") m.size = fileRec.size;
+      merged.push(m);
+    } else {
+      merged.push(fileRec);
+    }
+  }
+
+  for (let i = 0; i < attachmentRecords.length; i++) {
+    if (!paired.has(i)) merged.push(attachmentRecords[i]!);
+  }
+
+  return merged;
 }
 
 export function normalizeInboundAttachments(
