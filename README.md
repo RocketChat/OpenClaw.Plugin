@@ -86,5 +86,5 @@ Add the plugin path to your `openclaw.json`:
 }
 ```
 
-## Learn more ?
+## Learn more
 Added a detailed blog :  https://readyy.hashnode.dev/building-rocket-chat-channel-plugin-for-openclaw
