@@ -1,22 +1,18 @@
 # Rocket.Chat Plugin for OpenClaw
-
-A channel plugin for [OpenClaw](https://opencode.ai) that enables direct integration with [Rocket.Chat](https://rocket.chat) — no external bridge server needed. It handles inbound message polling, outbound delivery, session management, and agent orchestration through a single plugin.
+A channel plugin for [OpenClaw](https://opencode.ai) that enables direct integration with [Rocket.Chat](https://rocket.chat), no external bridge server needed. It handles inbound message polling, outbound delivery, session management, and agent orchestration through a single plugin.
 
 ## Architecture
-
 The plugin uses REST polling on a configurable interval to fetch new messages from Rocket.Chat subscriptions. On each poll cycle, it checks for updated subscriptions via `subscriptions.get`, syncs new messages per room via `chat.syncMessages`, deduplicates using an in-memory Set combined with an on-disk checkpoint file, filters out system events and the bot's own messages, and dispatches user messages to OpenClaw's agent runtime. The outbound path delivers agent replies directly to Rocket.Chat rooms via `chat.postMessage`. A checkpoint file at `~/.openclaw/rocketchat/<accountId>.json` persists the last 250 message IDs and timestamp across restarts.
 
 ## Features
-
-- **Polling-based inbound** — REST polling on configurable interval (default 3s)
-- **Deduplication** — on-disk checkpoint + in-memory Set prevents re-processing
-- **Message filtering** — skips bot's own messages, system events, empty messages, duplicates
-- **Emoji reactions** — random processing emoji on receive, checkmark on delivery
-- **Direct outbound delivery** — replies posted to Rocket.Chat rooms via REST
-- **Token-based auth** — configured via standard OpenClaw channel config
+- **Polling-based inbound**: REST polling on configurable interval (default 3s)
+- **Deduplication**: on-disk checkpoint + in-memory Set prevents re-processing
+- **Message filtering**: skips bot's own messages, system events, empty messages, duplicates
+- **Emoji reactions**: random processing emoji on receive, checkmark on delivery
+- **Direct outbound delivery**: replies posted to Rocket.Chat rooms via REST
+- **Token-based auth**: configured via standard OpenClaw channel config
 
 ## What's Being Worked On
-
 - [x] Auth configuration window / setup wizard
 - [x] Updated polling to reduce no of requests
 - [ ] Concurrency control / per-room message queue
@@ -28,9 +24,7 @@ The plugin uses REST polling on a configurable interval to fetch new messages fr
 - [ ] WebSocket real-time transport (optional upgrade from polling)
 
 ## Configuration
-
 Added as `Example openclaw.example.json` in codebase
-
 ```json
 {
   "channels": {
@@ -52,9 +46,7 @@ Added as `Example openclaw.example.json` in codebase
   }
 }
 ```
-
 You also need at least one AI provider and a default agent model configured:
-
 ```json
 {
   "models": {
@@ -83,9 +75,7 @@ You also need at least one AI provider and a default agent model configured:
 ```
 
 ## Plugin Installation
-
 Add the plugin path to your `openclaw.json`:
-
 ```json
 {
   "plugins": {
