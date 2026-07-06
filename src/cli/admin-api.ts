@@ -1,5 +1,22 @@
 import { RocketChatClientError } from "../client.js";
+import { getErrorMessage } from "../utils.js";
 import type { RCLoginResult, RCUser, JsonObject } from "../types/types.js";
+
+function extractRecord(json: JsonObject, field: string): Record<string, unknown> {
+  const value = json[field];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new RocketChatClientError(`RC API response missing or invalid "${field}"`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function extractString(obj: Record<string, unknown>, key: string): string {
+  const v = obj[key];
+  if (typeof v !== "string" || v.length === 0) {
+    throw new RocketChatClientError(`RC API response missing or invalid "${key}"`);
+  }
+  return v;
+}
 
 type RCFetchOpts = {
   method?: string;
@@ -27,16 +44,10 @@ async function adminFetch(baseUrl: string, path: string, opts: RCFetchOpts = {})
   return json;
 }
 
-function getErrorMessage(payload: JsonObject, fallback: string): string {
-  if (typeof payload.error === "string" && payload.error.length > 0) return payload.error;
-  if (typeof payload.message === "string" && payload.message.length > 0) return payload.message;
-  return fallback;
-}
-
 export async function loginAs(baseUrl: string, user: string, password: string): Promise<RCLoginResult> {
   const json = await adminFetch(baseUrl, "/api/v1/login", { body: { user, password } });
-  const data = json.data as { userId: string; authToken: string };
-  return { userId: data.userId, authToken: data.authToken };
+  const data = extractRecord(json, "data");
+  return { userId: extractString(data, "userId"), authToken: extractString(data, "authToken") };
 }
 
 export async function createBotUser(
@@ -58,8 +69,8 @@ export async function createBotUser(
       sendWelcomeEmail: false,
     },
   });
-  const user = json.user as RCUser;
-  return { _id: user._id, username: user.username, name: user.name };
+  const userRecord = extractRecord(json, "user");
+  return { _id: extractString(userRecord, "_id"), username: extractString(userRecord, "username"), name: extractString(userRecord, "name") };
 }
 
 export async function getUserByUsername(
@@ -86,8 +97,8 @@ export async function createDirectMessage(baseUrl: string, auth: RCLoginResult, 
     authToken: auth.authToken,
     body: { username },
   });
-  const room = json.room as { _id: string };
-  return room._id;
+  const room = extractRecord(json, "room");
+  return extractString(room, "_id");
 }
 
 export async function sendMessage(baseUrl: string, auth: RCLoginResult, roomId: string, text: string): Promise<void> {
