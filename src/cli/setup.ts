@@ -102,9 +102,14 @@ async function main() {
   if (!botUsername) { fail("Bot username is required"); process.exit(1); }
   const botName = await prompt("Bot display name", botUsername);
   const botEmail = await prompt("Bot email", `${botUsername.toLowerCase()}@openclaw.local`);
-  const botPassword = await promptPassword("Bot password");
-
-  if (!botPassword) { fail("Password is required"); process.exit(1); }
+  let botPassword = "";
+  for (let attempts = 0; attempts < 2; attempts++) {
+    botPassword = await promptPassword(attempts === 0 ? "Bot password" : "Bot password (min 6 chars)");
+    if (!botPassword) { fail("Password is required"); }
+    else if (botPassword.length < 6) { fail("Password must be at least 6 characters"); }
+    else break;
+  }
+  if (!botPassword || botPassword.length < 6) { fail("Exiting — valid password required"); process.exit(1); }
 
   info("Checking if bot already exists...");
   let botUser: { _id: string; username: string; name: string };
