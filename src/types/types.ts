@@ -177,6 +177,16 @@ export type ChannelRuleOptions = {
 export type CheckpointState = {
   updatedSince: string | null;
   recentMessageIds: string[];
+  failedMessages?: FailedMessageRecord[];
+};
+
+export type FailedMessageRecord = {
+  messageId: string;
+  roomId: string;
+  senderName: string;
+  sentAt: string;
+  failedAt: string;
+  reason: string;
 };
 
 export type GatewayApi = {
@@ -225,5 +235,4 @@ export type AttachmentRecord = {
   filename?: string;
   size?: number;
 };
-
 

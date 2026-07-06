@@ -1,12 +1,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
-import type { CheckpointState } from "./types/types.js";
+import type { CheckpointState, FailedMessageRecord } from "./types/types.js";
 
 export class FileCheckpointStore {
   constructor(
     private readonly filePath: string,
-    private readonly limit = 250
+    private readonly limit = 250,
+    private readonly failureLimit = 100,
   ) {}
 
   async read(): Promise<CheckpointState> {
@@ -14,6 +15,7 @@ export class FileCheckpointStore {
     return {
       updatedSince: data.updatedSince ?? null,
       recentMessageIds: Array.isArray(data.recentMessageIds) ? [...data.recentMessageIds] : [],
+      failedMessages: Array.isArray(data.failedMessages) ? [...data.failedMessages] : [],
     };
   }
 
@@ -21,7 +23,17 @@ export class FileCheckpointStore {
     await this.save({
       updatedSince: state.updatedSince ?? null,
       recentMessageIds: state.recentMessageIds.slice(-this.limit),
+      failedMessages: (state.failedMessages ?? []).slice(-this.failureLimit),
     });
+  }
+
+  async recordFailure(failure: FailedMessageRecord): Promise<void> {
+    const state = await this.read();
+    const failedMessages = [
+      ...(state.failedMessages ?? []).filter((item) => item.messageId !== failure.messageId),
+      failure,
+    ].slice(-this.failureLimit);
+    await this.write({ ...state, failedMessages });
   }
 
   async hasSeen(messageId: string): Promise<boolean> {
@@ -38,7 +50,11 @@ export class FileCheckpointStore {
     }
   }
 
-  private async load(): Promise<{ updatedSince?: string | null; recentMessageIds?: string[] }> {
+  private async load(): Promise<{
+    updatedSince?: string | null;
+    recentMessageIds?: string[];
+    failedMessages?: FailedMessageRecord[];
+  }> {
     let raw: string;
     try {
       raw = await readFile(this.filePath, "utf8");
@@ -50,14 +66,22 @@ export class FileCheckpointStore {
     try {
       const parsed = JSON.parse(trimmed);
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        return parsed as { updatedSince?: string | null; recentMessageIds?: string[] };
+        return parsed as {
+          updatedSince?: string | null;
+          recentMessageIds?: string[];
+          failedMessages?: FailedMessageRecord[];
+        };
       }
     } catch {
     }
     return {};
   }
 
-  private async save(state: { updatedSince: string | null; recentMessageIds: string[] }): Promise<void> {
+  private async save(state: {
+    updatedSince: string | null;
+    recentMessageIds: string[];
+    failedMessages: FailedMessageRecord[];
+  }): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, JSON.stringify(state, null, 2));
   }

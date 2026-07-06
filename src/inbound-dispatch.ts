@@ -139,12 +139,12 @@ async function buildMediaContext(
 
   const results = await Promise.all(
     attachments.map(async (attachment) => {
-      if (attachment.url && client) {
+      if (attachment.source === "rocketchat-file" && attachment.url && client) {
         try {
           const filePath = await client.downloadAttachmentToTempFile(attachment.url, attachment.fileName ? { fileName: attachment.fileName } : undefined);
           return { kind: "path" as const, value: filePath, mimeType: attachment.mimeType };
         } catch {
-          // download failed — fall through to URL injection
+          return null;
         }
       }
 

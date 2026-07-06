@@ -87,8 +87,9 @@ async function pollOnce(
 ): Promise<void> {
   const stateData = await checkpoint.read();
   if (!stateData.updatedSince) {
-    await checkpoint.write({ updatedSince: new Date().toISOString(), recentMessageIds: stateData.recentMessageIds });
-    return;
+    const lookback = new Date(Date.now() - 300_000).toISOString();
+    await checkpoint.write({ updatedSince: lookback, recentMessageIds: stateData.recentMessageIds });
+    stateData.updatedSince = lookback;
   }
 
   const seenIds = new Set(stateData.recentMessageIds);
@@ -116,15 +117,32 @@ async function pollOnce(
 
       logger.info(`[rocketchat:${account.accountId}] inbound from ${event.senderName}: "${event.text.slice(0, 80)}"`);
 
+      seenIds.add(msg._id);
+      await checkpoint.write({
+        updatedSince: nextUpdatedSince,
+        recentMessageIds: [...seenIds].slice(-250),
+        failedMessages: stateData.failedMessages ?? [],
+      });
+
       if (ctx.channelRuntime) {
-        await handleMessage(ctx, event, client, account.accountId);
+        try {
+          await handleMessage(ctx, event, client, account.accountId);
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          logger.error(`[rocketchat:${account.accountId}] failed to handle message ${event.messageId}: ${reason}`);
+          await checkpoint.recordFailure({
+            messageId: event.messageId,
+            roomId: event.roomId,
+            senderName: event.senderName,
+            sentAt: event.sentAt,
+            failedAt: new Date().toISOString(),
+            reason,
+          });
+        }
       } else if (!state.warnedAboutMissingRuntime) {
         state.warnedAboutMissingRuntime = true;
         logger.error(`[rocketchat:${account.accountId}] channel runtime is unavailable; inbound messages will be ignored`);
       }
-
-      seenIds.add(msg._id);
-      await checkpoint.write({ updatedSince: nextUpdatedSince, recentMessageIds: [...seenIds].slice(-250) });
     }
   }
 

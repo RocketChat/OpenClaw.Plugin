@@ -141,7 +141,7 @@ export class RocketChatClient {
   ): Promise<string> {
     await this.ensureInitialized();
     const requestUrl = resolveUrl(url, this.serverUrl);
-    if (isBlockedUrl(requestUrl)) {
+    if (isBlockedUrl(requestUrl, this.serverUrl)) {
       throw new RocketChatClientError(`attachment download blocked: ${requestUrl} resolves to a private/internal address`);
     }
     const response = await this.fetchFn(requestUrl, {
@@ -290,9 +290,14 @@ export class RocketChatClient {
   }
 }
 
-function isBlockedUrl(url: string): boolean {
+function isBlockedUrl(url: string, allowedOrigin?: string): boolean {
   try {
-    const hostname = new URL(url).hostname.toLowerCase();
+    const parsedUrl = new URL(url);
+    const hostname = parsedUrl.hostname.toLowerCase();
+    const allowed = allowedOrigin ? new URL(allowedOrigin) : undefined;
+    if (allowed && parsedUrl.origin === allowed.origin) {
+      return false;
+    }
     if (
       hostname === "localhost" ||
       hostname === "127.0.0.1" ||
@@ -355,6 +360,4 @@ function getRetryAfterMs(response: Response, payload: JsonObject): number {
 
   return 30_000;
 }
-
-
 
