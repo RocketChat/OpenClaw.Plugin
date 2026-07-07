@@ -18,7 +18,7 @@ The plugin uses REST polling on a configurable interval to fetch new messages fr
 - [ ] Concurrency control / per-room message queue
 - [ ] Rate limiting and security hardening
 - [ ] Media handling (files and audio)
-- [ ] Group chat @mention support and routing
+- [x] Group chat @mention support, routing and thread replies
 - [ ] Bot delegation / multi-bot task routing
 - [ ] Shortcuts and slash commands
 - [ ] WebSocket real-time transport (optional upgrade from polling)
