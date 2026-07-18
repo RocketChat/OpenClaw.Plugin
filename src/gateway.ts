@@ -52,10 +52,10 @@ class PollState {
   warnedAboutMissingRuntime = false;
 
   getInterval(): number {
-    if (this.consecutiveEmptyPolls < 3) return 3_000;
-    if (this.consecutiveEmptyPolls < 10) return 10_000;
-    if (this.consecutiveEmptyPolls < 20) return 30_000;
-    return 60_000;
+    if (this.consecutiveEmptyPolls < 3) return 1_000;
+    if (this.consecutiveEmptyPolls < 10) return 3_000;
+    if (this.consecutiveEmptyPolls < 20) return 10_000;
+    return 20_000;
   }
 
   recordCycle(foundMessages: boolean): void {
