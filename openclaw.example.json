@@ -65,6 +65,8 @@
           },
           "transport": { "mode": "polling" },
           "mentionNames": ["your-bot-username"]
+          // For real-time inbound via DDP WebSocket instead of REST polling, use:
+          // "transport": { "mode": "websocket", "reconnectDelayMs": 2000 },
         }
       }
     }
