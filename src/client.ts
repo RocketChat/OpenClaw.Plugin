@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { resolveOpenClawDir, resolveUrl, getExt, getErrorMessage } from "./utils.js";
 
 const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
-const ALLOWED_DOWNLOAD_MIME_PREFIXES = ["image/"];
+const ALLOWED_DOWNLOAD_MIME_PREFIXES = ["image/", "audio/", "video/", "application/"];
 
 import type {
   PluginAccountConfig,

@@ -155,7 +155,7 @@ async function main() {
       pluginId: "rocketchat",
       accountId: "main",
       serverUrl: rcUrl,
-      transport: { mode: "polling" },
+      transport: { mode: "websocket" },
       mentionNames: [botUsername],
       auth: { mode: "token", userId: botAuth.userId, accessToken: botAuth.authToken },
     });

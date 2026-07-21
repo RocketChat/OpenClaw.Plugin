@@ -49,7 +49,7 @@ export function updateConfig(opts: {
     enabled: true,
     serverUrl: opts.serverUrl,
     auth: { mode: "token", userId: opts.auth.userId, accessToken: opts.auth.accessToken },
-    transport: opts.transport ?? { mode: "polling" },
+    transport: opts.transport ?? { mode: "websocket" },
     mentionNames: opts.mentionNames ?? [],
   };
 

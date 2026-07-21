@@ -350,6 +350,7 @@ async function startDdpGateway(
 
       const sub: RocketChatSubscriptionRecord = { rid: msg.rid, t: roomTypeMap.get(msg.rid) ?? "c" };
       const event = toInboundEvent(accountId, sub, msg, account.serverUrl);
+      logger.info(`[rocketchat:${accountId}] inbound from ${event.senderName}: "${event.text.slice(0, 80)}"`);
 
       if (!shouldHandleInboundEvent(event, { botUserId: identity.userId, mentionNames })) return;
 
@@ -412,7 +413,7 @@ function shouldSkipMessage(
   seenIds: Set<string>,
 ): boolean {
   if (!msg._id) return true;
-  if (msg.t) return true;
+  if (msg.t && getMessageAttachmentInputs(msg).length === 0) return true;
   if ((!msg.msg || msg.msg.trim().length === 0) && getMessageAttachmentInputs(msg).length === 0) return true;
   if (msg.u?._id === botUserId) return true;
   if (seenIds.has(msg._id)) return true;

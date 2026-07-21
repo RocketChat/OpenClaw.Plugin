@@ -13,7 +13,7 @@ const passwordAuthSchema = z.object({
 }).strict();
 
 const transportSchema = z.preprocess(
-  (value) => value ?? { mode: "polling" },
+  (value) => value ?? { mode: "websocket" },
   z.discriminatedUnion("mode", [
     z.object({
       mode: z.literal("polling"),
