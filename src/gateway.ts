@@ -3,7 +3,8 @@ import { RocketChatClient, RocketChatRateLimitError } from "./client.js";
 import { parsePluginConfig } from "./config.js";
 import { FileCheckpointStore } from "./checkpoint-store.js";
 import { getMessageAttachmentInputs, normalizeInboundAttachments } from "./attachments.js";
-import type { InboundEvent } from "./types/types.js";
+import { RocketChatDdpConnection } from "./ddp.js";
+import type { InboundEvent, RocketChatSubscriptionRecord, RocketChatMessageRecord } from "./types/types.js";
 import { shouldHandleInboundEvent } from "./channel.js";
 import { dispatchInboundEventWithChannelRuntime } from "./inbound-dispatch.js";
 import type {
@@ -52,10 +53,10 @@ class PollState {
   warnedAboutMissingRuntime = false;
 
   getInterval(): number {
-    if (this.consecutiveEmptyPolls < 3) return 3_000;
-    if (this.consecutiveEmptyPolls < 10) return 10_000;
-    if (this.consecutiveEmptyPolls < 20) return 30_000;
-    return 60_000;
+    if (this.consecutiveEmptyPolls < 3) return 1_000;
+    if (this.consecutiveEmptyPolls < 10) return 3_000;
+    if (this.consecutiveEmptyPolls < 20) return 10_000;
+    return 20_000;
   }
 
   recordCycle(foundMessages: boolean): void {
@@ -228,8 +229,13 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
   const stateDir = resolveOpenClawDir();
   const checkpointPath = `${stateDir}/rocketchat/${account.accountId}.json`;
   const checkpoint = new FileCheckpointStore(checkpointPath, 250);
-  const state = new PollState();
   const mentionNames = dedupeMentions([identity.username, ...account.mentionNames]);
+
+  if (account.transport.mode === "websocket") {
+    return startDdpGateway(ctx, account, identity, client, checkpoint, mentionNames, generation);
+  }
+
+  const state = new PollState();
 
   const safePollOnce = async (): Promise<void> => {
     if (state.stopped) return;
@@ -298,13 +304,116 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
   }
 }
 
+async function startDdpGateway(
+  ctx: GatewayContext,
+  account: ResolvedAccount,
+  identity: RocketChatIdentity,
+  client: RocketChatClient,
+  checkpoint: FileCheckpointStore,
+  mentionNames: string[],
+  generation: number,
+): Promise<void> {
+  const accountId = account.accountId;
+  const wsBase = account.serverUrl.replace(/^http/i, "ws").replace(/\/+$/, "");
+  const wsUrl = `${wsBase}/websocket`;
+  const reconnectDelayMs =
+    account.transport.mode === "websocket" ? account.transport.reconnectDelayMs ?? 2_000 : 2_000;
+
+  // rid -> room type map so toInboundEvent can route DMs/groups/channels correctly.
+  // Self-heals: re-fetched on every (re)connect.
+  let roomTypeMap = new Map<string, string>();
+  const refreshRoomTypes = async () => {
+    try {
+      const subs = await client.listSubscriptions(null);
+      roomTypeMap = new Map(subs.map((sub) => [sub.rid, sub.t ?? "c"]));
+    } catch (err) {
+      logger.error(`[rocketchat:${accountId}] failed to refresh room types: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const stateData = await checkpoint.read();
+  const seenIds = new Set(stateData.recentMessageIds);
+
+  const connection = new RocketChatDdpConnection({
+    wsUrl,
+    authToken: identity.authToken,
+    reconnectDelayMs,
+    onStatus: (status) => {
+      if (status === "connecting") {
+        void refreshRoomTypes();
+      }
+      logger.info(`[rocketchat:${accountId}] ddp status: ${status}`);
+    },
+    onError: (error) => logger.error(`[rocketchat:${accountId}] ddp error: ${error.message}`),
+    onMessage: async (msg: RocketChatMessageRecord) => {
+      if (shouldSkipMessage(msg, identity.userId, seenIds)) return;
+
+      const sub: RocketChatSubscriptionRecord = { rid: msg.rid, t: roomTypeMap.get(msg.rid) ?? "c" };
+      const event = toInboundEvent(accountId, sub, msg, account.serverUrl);
+      logger.info(`[rocketchat:${accountId}] inbound from ${event.senderName}: "${event.text.slice(0, 80)}"`);
+
+      if (!shouldHandleInboundEvent(event, { botUserId: identity.userId, mentionNames })) return;
+
+      seenIds.add(msg._id);
+      await checkpoint.write({
+        updatedSince: stateData.updatedSince,
+        recentMessageIds: [...seenIds].slice(-250),
+        failedMessages: stateData.failedMessages ?? [],
+      });
+
+      if (ctx.channelRuntime) {
+        try {
+          await handleMessage(ctx, event, client, accountId);
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          logger.error(`[rocketchat:${accountId}] failed to handle message ${event.messageId}: ${reason}`);
+          await checkpoint.recordFailure({
+            messageId: event.messageId,
+            roomId: event.roomId,
+            senderName: event.senderName,
+            sentAt: event.sentAt,
+            failedAt: new Date().toISOString(),
+            reason,
+          });
+        }
+      } else {
+        logger.error(`[rocketchat:${accountId}] channel runtime unavailable; inbound message ignored`);
+      }
+    },
+  });
+
+  const wakeup = () => {
+    logger.info(`[rocketchat:${accountId}] ddp wakeup (no-op for websocket transport)`);
+  };
+
+  activeClients.set(accountId, { client, generation, wakeup });
+  connection.start();
+
+  try {
+    await new Promise<void>((resolve) => {
+      if (ctx.abortSignal?.aborted) {
+        resolve();
+        return;
+      }
+      ctx.abortSignal?.addEventListener("abort", () => resolve(), { once: true });
+    });
+  } finally {
+    connection.stop();
+    const current = activeClients.get(accountId);
+    if (current?.generation === generation) {
+      activeClients.delete(accountId);
+    }
+    ctx.setStatus?.("stopped");
+  }
+}
+
 function shouldSkipMessage(
   msg: import("./types/types.js").RocketChatMessageRecord,
   botUserId: string,
   seenIds: Set<string>,
 ): boolean {
   if (!msg._id) return true;
-  if (msg.t) return true;
+  if (msg.t && getMessageAttachmentInputs(msg).length === 0) return true;
   if ((!msg.msg || msg.msg.trim().length === 0) && getMessageAttachmentInputs(msg).length === 0) return true;
   if (msg.u?._id === botUserId) return true;
   if (seenIds.has(msg._id)) return true;

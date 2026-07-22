@@ -13,6 +13,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "setup": "node --import tsx src/cli/setup.ts",
+    "probe": "tsx src/cli/ddp-probe.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -28,11 +29,15 @@
   "homepage": "https://github.com/RocketChat/OpenClaw.Plugin#readme",
   "devDependencies": {
     "@types/node": "^25.9.1",
+    "@types/ws": "^8.18.1",
+    "dotenv": "^17.4.2",
+    "openclaw": "^2026.7.1-2",
     "ts-node": "^10.9.2",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   },
   "dependencies": {
+    "ws": "^8.21.1",
     "zod": "^4.4.3"
   }
 }

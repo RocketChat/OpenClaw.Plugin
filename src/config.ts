@@ -13,10 +13,16 @@ const passwordAuthSchema = z.object({
 }).strict();
 
 const transportSchema = z.preprocess(
-  (value) => value ?? { mode: "polling" },
-  z.object({
-    mode: z.literal("polling"),
-  }).strict()
+  (value) => value ?? { mode: "websocket" },
+  z.discriminatedUnion("mode", [
+    z.object({
+      mode: z.literal("polling"),
+    }).strict(),
+    z.object({
+      mode: z.literal("websocket"),
+      reconnectDelayMs: z.number().int().positive().default(2_000),
+    }).strict(),
+  ]),
 );
 
 const accountSchema = z.object({
