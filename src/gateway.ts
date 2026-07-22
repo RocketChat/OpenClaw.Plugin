@@ -314,8 +314,7 @@ async function startDdpGateway(
   generation: number,
 ): Promise<void> {
   const accountId = account.accountId;
-  const wsBase = account.serverUrl.replace(/^http/i, "ws").replace(/\/+$/, "");
-  const wsUrl = `${wsBase}/websocket`;
+  const wsUrl = account.serverUrl.replace(/^http/i, "ws").replace(/\/+$/, "");
   const reconnectDelayMs =
     account.transport.mode === "websocket" ? account.transport.reconnectDelayMs ?? 2_000 : 2_000;
 

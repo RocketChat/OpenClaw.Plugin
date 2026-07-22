@@ -2,6 +2,7 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { randomUUID } from "node:crypto";
 
+import type { DDPSDK } from "@rocket.chat/ddp-client";
 import { resolveOpenClawDir, resolveUrl, getExt, getErrorMessage } from "./utils.js";
 
 const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;

@@ -9,7 +9,7 @@
     "rocketchat": {
       "schema": {
         "type": "object",
-        "additionalProperties": false,
+        "additionalProperties": true,
         "properties": {
           "accounts": {
             "type": "object",
