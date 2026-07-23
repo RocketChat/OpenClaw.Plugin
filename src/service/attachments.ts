@@ -1,5 +1,5 @@
-import { resolveUrl, getExt } from "./utils.js";
-import type { InboundAttachment, InboundAttachmentKind, AttachmentRecord } from "./types/types.js";
+import { resolveUrl, getExt } from "../utils.js";
+import type { InboundAttachment, InboundAttachmentKind, AttachmentRecord } from "../types.js";
 
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "tif"]);
 const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "mkv", "webm", "avi", "m4v"]);

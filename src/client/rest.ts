@@ -1,9 +1,8 @@
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { randomUUID } from "node:crypto";
-
-import type { DDPSDK } from "@rocket.chat/ddp-client";
-import { resolveOpenClawDir, resolveUrl, getExt, getErrorMessage } from "./utils.js";
+import { resolveOpenClawDir, resolveUrl, getExt, getErrorMessage } from "../utils.js";
+import ipaddr from "ipaddr.js";
 
 const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
 const ALLOWED_DOWNLOAD_MIME_PREFIXES = ["image/", "audio/", "video/", "application/"];
@@ -15,7 +14,7 @@ import type {
   RocketChatMessageRecord,
   RocketChatClientOptions,
   JsonObject,
-} from "./types/types.js";
+} from "../types.js";
 
 export class RocketChatClientError extends Error {
   constructor(message: string) {
@@ -95,15 +94,6 @@ export class RocketChatClient {
     return Array.isArray(payload.update) ? payload.update : [];
   }
 
-  async syncMessages(roomId: string, updatedSince: string | null): Promise<RocketChatMessageRecord[]> {
-    const url = new URL("/api/v1/chat.syncMessages", this.serverUrl);
-    url.searchParams.set("roomId", roomId);
-    if (updatedSince) url.searchParams.set("lastUpdate", updatedSince);
-    const payload = await this.requestJson(url, { method: "GET" });
-    const result = asObject(payload.result ?? {});
-    return Array.isArray(result.updated) ? result.updated : [];
-  }
-
   async postMessage(roomId: string, text: string, options?: { tmid?: string }): Promise<string> {
     const body: Record<string, string> = { roomId, text };
     if (options?.tmid) body.tmid = options.tmid;
@@ -113,20 +103,6 @@ export class RocketChatClient {
     });
     const message = asObject(payload.message);
     return getString(message, "_id");
-  }
-
-  async updateMessage(roomId: string, messageId: string, text: string): Promise<void> {
-    await this.requestJson(new URL("/api/v1/chat.update", this.serverUrl), {
-      method: "POST",
-      body: JSON.stringify({ roomId, msgId: messageId, text }),
-    });
-  }
-
-  async deleteMessage(roomId: string, messageId: string): Promise<void> {
-    await this.requestJson(new URL("/api/v1/chat.delete", this.serverUrl), {
-      method: "POST",
-      body: JSON.stringify({ roomId, msgId: messageId, asUser: true }),
-    });
   }
 
   async reactToMessage(messageId: string, reaction: string): Promise<void> {
@@ -142,7 +118,7 @@ export class RocketChatClient {
   ): Promise<string> {
     await this.ensureInitialized();
     const requestUrl = resolveUrl(url, this.serverUrl);
-    if (isBlockedUrl(requestUrl, this.serverUrl)) {
+    if (!isSafeExternalUrl(requestUrl, this.serverUrl)) {
       throw new RocketChatClientError(`attachment download blocked: ${requestUrl} resolves to a private/internal address`);
     }
     const response = await this.fetchFn(requestUrl, {
@@ -291,29 +267,24 @@ export class RocketChatClient {
   }
 }
 
-function isBlockedUrl(url: string, allowedOrigin?: string): boolean {
+function isSafeExternalUrl(url: string, serverUrl: string): boolean {
   try {
-    const parsedUrl = new URL(url);
-    const hostname = parsedUrl.hostname.toLowerCase();
-    const allowed = allowedOrigin ? new URL(allowedOrigin) : undefined;
-    if (allowed && parsedUrl.origin === allowed.origin) {
-      return false;
-    }
-    if (
-      hostname === "localhost" ||
-      hostname === "127.0.0.1" ||
-      hostname === "::1" ||
-      hostname === "0.0.0.0" ||
-      hostname.endsWith(".local") ||
-      hostname.endsWith(".internal") ||
-      hostname.startsWith("10.") ||
-      hostname.startsWith("192.168.") ||
-      /^172\.(1[6-9]|2\d|3[01])\./.test(hostname) ||
-      /^169\.254\./.test(hostname)
-    ) {
-      return true;
-    }
+    const parsed = new URL(url);
+    const trusted = new URL(serverUrl);
+    if (parsed.origin === trusted.origin) return true;
+    return !isPrivateHostname(parsed.hostname);
+  } catch {
     return false;
+  }
+}
+
+function isPrivateHostname(hostname: string): boolean {
+  const lower = hostname.toLowerCase();
+  if (lower === "localhost" || lower.endsWith(".local") || lower.endsWith(".internal")) return true;
+  const raw = lower.replace(/^\[|\]$/g, "");
+  try {
+    const addr = ipaddr.parse(raw);
+    return addr.range() !== "unicast";
   } catch {
     return false;
   }

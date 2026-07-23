@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { loginAs, createBotUser, getUserByUsername, createDirectMessage, sendMessage } from "./admin-api.js";
 import { updateConfig } from "./config-updater.js";
-import type { RCLoginResult } from "../types/types.js";
+import type { RCLoginResult } from "../types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_PATH = resolve(__dirname, "..", "..");

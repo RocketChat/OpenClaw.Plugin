@@ -1,5 +1,5 @@
-import type { InboundEvent, OpenClawConfigLike, OutboundReplyPayload, ReplyDeliverInfo, ChannelRuntimeLike, InboundAttachment } from "./types/types.js";
-import type { RocketChatClient } from "./client.js";
+import type { InboundEvent, OpenClawConfigLike, OutboundReplyPayload, ReplyDeliverInfo, ChannelRuntimeLike, InboundAttachment } from "../types.js";
+import type { RocketChatClient } from "../client/rest.js";
 
 export async function dispatchInboundEventWithChannelRuntime(params: {
   cfg: OpenClawConfigLike;

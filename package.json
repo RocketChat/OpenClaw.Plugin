@@ -32,13 +32,12 @@
     "@types/ws": "^8.18.1",
     "dotenv": "^17.4.2",
     "openclaw": "^2026.7.1-2",
-    "ts-node": "^10.9.2",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   },
   "dependencies": {
     "@rocket.chat/ddp-client": "^1.1.1",
-    "@rocket.chat/emitter": "^0.33.0",
+    "ipaddr.js": "^2.4.0",
     "ws": "^8.21.1",
     "zod": "^4.4.3"
   }

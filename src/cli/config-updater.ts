@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
-import type { AuthCredentials, JsonObject } from "../types/types.js";
+import type { AuthCredentials, JsonObject } from "../types.js";
 
 const OC_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
 

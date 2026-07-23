@@ -1,5 +1,5 @@
-import type { InboundEvent } from "./types/types.js";
-import type { ChannelRuleOptions } from "./types/types.js";
+import type { InboundEvent } from "../types.js";
+import type { ChannelRuleOptions } from "../types.js";
 
 export function shouldHandleInboundEvent(
   event: InboundEvent,

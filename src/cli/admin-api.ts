@@ -1,6 +1,6 @@
-import { RocketChatClientError } from "../client.js";
+import { RocketChatClientError } from "../client/rest.js";
 import { getErrorMessage } from "../utils.js";
-import type { RCLoginResult, RCUser, JsonObject } from "../types/types.js";
+import type { RCLoginResult, RCUser, JsonObject } from "../types.js";
 
 function extractRecord(json: JsonObject, field: string): Record<string, unknown> {
   const value = json[field];

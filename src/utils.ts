@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { JsonObject } from "./types/types.js";
+import type { JsonObject } from "./types.js";
 
 export function resolveOpenClawDir(): string {
   const explicit = process.env.OPENCLAW_STATE_DIR?.trim();
