@@ -45,8 +45,12 @@ export class RocketChatDdpConnection {
     await this.call("setReaction", reaction, messageId);
   }
 
-  async sendTyping(roomId: string, isTyping: boolean): Promise<void> {
-    await this.call("stream-notify-room", `${roomId}/typing`, this.options.username, isTyping);
+  async sendTyping(roomId: string, isTyping: boolean, logger?: { error: (msg: string) => void }): Promise<void> {
+    try {
+      await this.call("stream-notify-room", `${roomId}/typing`, this.options.username, isTyping);
+    } catch (err) {
+      logger?.error(`[ddp] sendTyping failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   start(): void {
