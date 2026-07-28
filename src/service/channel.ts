@@ -1,6 +1,8 @@
 import type { InboundEvent } from "../types.js";
 import type { ChannelRuleOptions } from "../types.js";
 
+const BROADCAST_MENTIONS = new Set(["here", "all", "everyone"]);
+
 export function shouldHandleInboundEvent(
   event: InboundEvent,
   options: ChannelRuleOptions,
@@ -13,16 +15,24 @@ export function shouldHandleInboundEvent(
     return true;
   }
 
-  const aliases = options.mentionNames.map(normalizeMention);
-  const explicitMentions = event.mentions.map(normalizeMention);
-  if (explicitMentions.some((mention) => aliases.includes(mention))) {
-    return true;
+  const aliases = new Set(
+    options.mentionNames.map((a) => a.trim().replace(/^@+/, "").toLowerCase()),
+  );
+
+  // Check server-parsed mentions array (authoritative)
+  // RC populates this when a user is @mentioned — skip broadcast mentions
+  for (const mention of event.mentions) {
+    const name = mention.toLowerCase();
+    if (BROADCAST_MENTIONS.has(name)) continue;
+    if (aliases.has(name)) return true;
   }
 
+  // Fallback: check raw text for @alias (covers clients/plugins that
+  // don't populate the mentions array)
   const normalizedText = event.text.toLowerCase();
-  return aliases.some((alias) => normalizedText.includes(`@${alias}`));
-}
+  for (const alias of aliases) {
+    if (normalizedText.includes(`@${alias}`)) return true;
+  }
 
-function normalizeMention(value: string): string {
-  return value.trim().replace(/^@+/, "").toLowerCase();
+  return false;
 }

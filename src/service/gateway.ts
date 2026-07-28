@@ -155,6 +155,16 @@ async function startDdpGateway(
   const stateData = await checkpoint.read();
   const seenIds = new Set(stateData.recentMessageIds);
 
+  const roomTypes = new Map<string, string>();
+  try {
+    const subs = await client.listSubscriptions(null);
+    for (const sub of subs) {
+      if (sub.rid && sub.t) roomTypes.set(sub.rid, sub.t);
+    }
+  } catch (err) {
+    logger.error(`[rocketchat:${accountId}] failed to fetch subscriptions: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   const connection = new RocketChatDdpConnection({
     wsUrl,
     authToken: identity.authToken,
@@ -167,7 +177,7 @@ async function startDdpGateway(
     onMessage: async (msg: RocketChatMessageRecord) => {
       if (shouldSkipMessage(msg, identity.userId, seenIds)) return;
 
-      const sub: RocketChatSubscriptionRecord = { rid: msg.rid, t: "d" };
+      const sub: RocketChatSubscriptionRecord = { rid: msg.rid, t: roomTypes.get(msg.rid) ?? "c" };
       const event = toInboundEvent(accountId, sub, msg, account.serverUrl);
       logger.info(`[rocketchat:${accountId}] inbound from ${event.senderName}: "${event.text.slice(0, 80)}"`);
 
