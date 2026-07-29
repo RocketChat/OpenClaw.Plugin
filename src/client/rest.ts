@@ -112,6 +112,27 @@ export class RocketChatClient {
     });
   }
 
+  async getMessage(messageId: string): Promise<{ text: string | null; quotedId: string | null }> {
+    const payload = await this.requestJson(
+      new URL(`/api/v1/chat.getMessage?msgId=${encodeURIComponent(messageId)}`, this.serverUrl),
+      { method: "GET" },
+    );
+    const message = asObject(payload.message);
+    const text = typeof message.msg === "string" && message.msg.length > 0 ? message.msg : null;
+    const attachments = Array.isArray(message.attachments) ? message.attachments : [];
+    let quotedId: string | null = null;
+    for (const att of attachments) {
+      const record = att as { message_link?: string };
+      const link = typeof record.message_link === "string" ? record.message_link : "";
+      const match = link.match(/[?&]msg=([A-Za-z0-9]+)/);
+      if (match) {
+        quotedId = match[1]!;
+        break;
+      }
+    }
+    return { text, quotedId };
+  }
+
   async downloadAttachmentToTempFile(
     url: string,
     options?: { fileName?: string },

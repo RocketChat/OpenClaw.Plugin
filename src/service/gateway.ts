@@ -178,8 +178,11 @@ async function startDdpGateway(
       if (shouldSkipMessage(msg, identity.userId, seenIds)) return;
 
       const sub: RocketChatSubscriptionRecord = { rid: msg.rid, t: roomTypes.get(msg.rid) ?? "c" };
-      const event = toInboundEvent(accountId, sub, msg, account.serverUrl);
+      const event = await toInboundEvent(accountId, sub, msg, account.serverUrl, client);
       logger.info(`[rocketchat:${accountId}] inbound from ${event.senderName}: "${event.text.slice(0, 80)}"`);
+      if (event.quotedText) {
+        logger.info(`[rocketchat:${accountId}] quoted context (${event.quotedText.length} chars): "${event.quotedText.slice(0, 120)}"`);
+      }
 
       if (!shouldHandleInboundEvent(event, { botUserId: identity.userId, mentionNames })) return;
 
@@ -249,13 +252,35 @@ function shouldSkipMessage(
   return false;
 }
 
-function toInboundEvent(
+async function toInboundEvent(
   accountId: string,
   sub: import("../types.js").RocketChatSubscriptionRecord,
   msg: import("../types.js").RocketChatMessageRecord,
-  serverUrl?: string,
-): InboundEvent {
+  serverUrl: string | undefined,
+  client: RocketChatClient | null,
+): Promise<InboundEvent> {
   const rawAttachments = getMessageAttachmentInputs(msg);
+
+  // Resolve quoted/reply context (walk the chain up to 4 levels deep)
+  let quotedText: string | undefined;
+  let nextQuotedId: string | null = msg.tmid ?? extractQuotedMessageId(msg) ?? null;
+  const maxDepth = 4;
+  let depth = 0;
+  while (nextQuotedId && client && depth < maxDepth) {
+    try {
+      const fetched = await client.getMessage(nextQuotedId);
+      const fetchedText = fetched.text;
+      if (fetchedText && !isQuoteLinkOnly(fetchedText)) {
+        quotedText = fetchedText.slice(0, MAX_MESSAGE_LENGTH);
+        break;
+      }
+      nextQuotedId = fetched.quotedId;
+    } catch {
+      break;
+    }
+    depth++;
+  }
+
   return {
     accountId,
     roomId: msg.rid,
@@ -267,9 +292,27 @@ function toInboundEvent(
     text: (msg.msg ?? "").slice(0, MAX_MESSAGE_LENGTH),
     mentions: (msg.mentions ?? []).map((m) => m.username ?? m.name ?? "").filter(Boolean),
     attachments: normalizeInboundAttachments(rawAttachments.slice(0, MAX_ATTACHMENTS), serverUrl ? { serverUrl } : undefined),
+    ...(quotedText ? { quotedText } : {}),
     sentAt: msg.ts ?? new Date(0).toISOString(),
     raw: msg,
   };
+}
+
+function extractQuotedMessageId(msg: import("../types.js").RocketChatMessageRecord): string | undefined {
+  const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
+  for (const att of attachments) {
+    const record = att as { message_link?: string };
+    const link = typeof record.message_link === "string" ? record.message_link : "";
+    const match = link.match(/[?&]msg=([A-Za-z0-9]+)/);
+    if (match) return match[1];
+  }
+  return undefined;
+}
+
+function isQuoteLinkOnly(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("[ ](") && !trimmed.startsWith("[![](")) return false;
+  return /[?&]msg=[A-Za-z0-9]+/.test(trimmed);
 }
 
 function mapRoomType(t: string | undefined): InboundEvent["roomType"] {

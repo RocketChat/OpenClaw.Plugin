@@ -88,6 +88,7 @@ export type InboundEvent = {
   text: string;
   mentions: string[];
   attachments: InboundAttachment[];
+  quotedText?: string;
   sentAt: string;
   raw: RocketChatMessageRecord;
 };

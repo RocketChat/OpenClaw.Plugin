@@ -29,7 +29,6 @@
 - [ ] Borrow and lend the openclaw bot
  
 
-
 ## Phase 6 - Error handling and cleaning up the dead code and merging to main
 - [ ] Keep the main code up to date merged to avoid conflicts later
 - [ ] Media handling tightining up including voice instructions
@@ -38,6 +37,12 @@
 - [ ] Bot exec theek so it doesn't fail with basic shell commands running so have strict error handling logic and  bot should show whats wrong to user
 - [ ] Double messages firing shouldn't happen and bot shouldn't go crazy
 - [ ] Test with better models and config
+
+
+## Phase 7
+- [ ] Avoid user exploitation 
+- [ ] Add concurrency for the bot
+- [ ] 
 
 
 ##  Final Phase - Leftovers

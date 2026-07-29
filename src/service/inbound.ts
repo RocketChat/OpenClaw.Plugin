@@ -35,18 +35,20 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
   const timestamp = toEpochMs(params.event.sentAt);
   const to = buildRecipientAddress(params.event);
 
+  const bodyForAgent = buildBodyForAgent(params.event);
+
   const body = params.channelRuntime.reply.formatAgentEnvelope({
     channel: "Rocket.Chat",
     from: buildConversationLabel(params.event),
     timestamp,
     previousTimestamp,
     envelope: envelopeOptions,
-    body: params.event.text,
+    body: bodyForAgent,
   });
 
   const ctxPayload = params.channelRuntime.reply.finalizeInboundContext({
     Body: body,
-    BodyForAgent: params.event.text,
+    BodyForAgent: bodyForAgent,
     RawBody: params.event.text,
     CommandBody: params.event.text,
     From: buildSenderAddress(params.event),
@@ -180,4 +182,9 @@ async function buildMediaContext(
 function toEpochMs(value: string): number | undefined {
   const timestamp = Date.parse(value);
   return Number.isNaN(timestamp) ? undefined : timestamp;
+}
+
+function buildBodyForAgent(event: InboundEvent): string {
+  if (!event.quotedText) return event.text;
+  return `The user is replying to / quoting the following message in this channel:\n---\n${event.quotedText}\n---\n\nThe user's question or instruction about the quoted message above: ${event.text}\n\nAnswer the user's question by referring to the quoted content above.`;
 }
