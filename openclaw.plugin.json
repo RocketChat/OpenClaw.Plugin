@@ -9,7 +9,7 @@
     "rocketchat": {
       "schema": {
         "type": "object",
-        "additionalProperties": false,
+        "additionalProperties": true,
         "properties": {
           "accounts": {
             "type": "object",
@@ -53,6 +53,15 @@
                         "mode": { "const": "polling" }
                       },
                       "required": ["mode"]
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "properties": {
+                        "mode": { "const": "websocket" },
+                        "reconnectDelayMs": { "type": "integer", "exclusiveMinimum": 0 }
+                      },
+                      "required": ["mode"]
                     }
                   ]
                 },
@@ -71,7 +80,7 @@
   },
   "configSchema": {
     "type": "object",
-    "additionalProperties": false,
+    "additionalProperties": true,
     "properties": {
       "accounts": {
         "type": "object",
@@ -113,6 +122,15 @@
                   "additionalProperties": false,
                   "properties": {
                     "mode": { "const": "polling" }
+                  },
+                  "required": ["mode"]
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "mode": { "const": "websocket" },
+                    "reconnectDelayMs": { "type": "integer", "exclusiveMinimum": 0 }
                   },
                   "required": ["mode"]
                 }

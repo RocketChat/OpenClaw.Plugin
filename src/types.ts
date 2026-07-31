@@ -1,5 +1,5 @@
-import type { PluginAccountConfig } from "../config.js";
-export type { PluginConfig, PluginAccountConfig } from "../config.js";
+import type { PluginAccountConfig } from "./config/schema.js";
+export type { PluginConfig, PluginAccountConfig } from "./config/schema.js";
 
 export type InboundAttachmentKind = "image" | "audio" | "document" | "video" | "unknown";
 
@@ -88,6 +88,7 @@ export type InboundEvent = {
   text: string;
   mentions: string[];
   attachments: InboundAttachment[];
+  quotedText?: string;
   sentAt: string;
   raw: RocketChatMessageRecord;
 };

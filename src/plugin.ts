@@ -1,8 +1,8 @@
 import { createChatChannelPlugin } from "openclaw/plugin-sdk/channel-core";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/core";
-import { RocketChatClient } from "./client.js";
-import { startGateway, resolveAccount, listAccountIds, isConfigured, activeClients } from "./gateway.js";
-import type { ResolvedAccount } from "./types/types.js";
+import { RocketChatClient } from "./client/rest.js";
+import { startGateway, resolveAccount, listAccountIds, isConfigured, activeClients } from "./service/gateway.js";
+import type { ResolvedAccount } from "./types.js";
 
 export { startGateway, resolveAccount, listAccountIds, isConfigured };
 
