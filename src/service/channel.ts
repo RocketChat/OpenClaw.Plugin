@@ -36,3 +36,32 @@ export function shouldHandleInboundEvent(
 
   return false;
 }
+
+export type CommandResult =
+  | { action: "reply"; replyText: string }
+  | { action: "passthrough" };
+
+const COMMAND_RE = /^\s*!(\S+)(?:\s+([\s\S]*))?$/i;
+
+export function matchCommand(text: string): CommandResult {
+  const stripped = text.replace(/^\s*(@\S+\s+)+/, "").trim();
+  const match = stripped.match(COMMAND_RE);
+  if (!match) return { action: "passthrough" };
+  const cmd = match[1]!.toLowerCase();
+
+  switch (cmd) {
+    case "help":
+      return { action: "reply", replyText: buildHelpText() };
+    default:
+      return { action: "passthrough" };
+  }
+}
+
+function buildHelpText(): string {
+  return [
+    "**OpenClaw commands**",
+    "",
+    "Help:",
+    "- `!help` — show this message",
+  ].join("\n");
+}

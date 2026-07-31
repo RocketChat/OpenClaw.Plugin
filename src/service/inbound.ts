@@ -1,10 +1,13 @@
 import type { InboundEvent, OpenClawConfigLike, OutboundReplyPayload, ReplyDeliverInfo, ChannelRuntimeLike, InboundAttachment } from "../types.js";
 import type { RocketChatClient } from "../client/rest.js";
+import type { GroupHistoryEntry } from "./group-history.js";
 
 export async function dispatchInboundEventWithChannelRuntime(params: {
   cfg: OpenClawConfigLike;
   accountId: string;
   event: InboundEvent;
+  groupHistory?: GroupHistoryEntry[];
+  identityUsername: string;
   channelRuntime: ChannelRuntimeLike;
   deliver(payload: OutboundReplyPayload, info: ReplyDeliverInfo): Promise<void>;
   onRecordError(err: unknown): void;
@@ -35,7 +38,7 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
   const timestamp = toEpochMs(params.event.sentAt);
   const to = buildRecipientAddress(params.event);
 
-  const bodyForAgent = buildBodyForAgent(params.event);
+  const bodyForAgent = buildBodyForAgent(params.event, params.groupHistory);
 
   const body = params.channelRuntime.reply.formatAgentEnvelope({
     channel: "Rocket.Chat",
@@ -59,6 +62,7 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     ConversationLabel: buildConversationLabel(params.event),
     GroupSubject: params.event.roomType === "direct" ? undefined : params.event.roomId,
     SenderId: params.event.senderId,
+    WasMentioned: params.event.roomType !== "direct" && params.event.mentions.includes(params.identityUsername),
     Provider: "rocketchat",
     Surface: "rocketchat",
     MessageSid: params.event.messageId,
@@ -184,7 +188,36 @@ function toEpochMs(value: string): number | undefined {
   return Number.isNaN(timestamp) ? undefined : timestamp;
 }
 
-function buildBodyForAgent(event: InboundEvent): string {
-  if (!event.quotedText) return event.text;
-  return `The user is replying to / quoting the following message in this channel:\n---\n${event.quotedText}\n---\n\nThe user's question or instruction about the quoted message above: ${event.text}\n\nAnswer the user's question by referring to the quoted content above.`;
+function buildBodyForAgent(event: InboundEvent, groupHistory: GroupHistoryEntry[] = []): string {
+  const labeled = labelGroupSender(event);
+  const historyText = formatHistoryForBody(groupHistory);
+
+  if (!event.quotedText) {
+    return historyText ? `${labeled}\n\n${historyText}` : labeled;
+  }
+
+  const trailer = historyText ? `\n\n${historyText}` : "";
+  return [
+    `The user is replying to / quoting the following message in this channel:`,
+    `---`,
+    event.quotedText,
+    `---`,
+    ``,
+    `The user's question or instruction about the quoted message above: ${event.text}`,
+    ``,
+    `Answer the user's question by referring to the quoted content above.`,
+    ``,
+    `(Sender: ${event.senderName})${trailer}`,
+  ].join("\n");
+}
+
+function formatHistoryForBody(history: GroupHistoryEntry[]): string {
+  if (history.length === 0) return "";
+  const lines = history.map((h) => `[${h.sender}]: ${h.body}`).join("\n");
+  return `Recent messages in this room (oldest to newest):\n${lines}`;
+}
+
+function labelGroupSender(event: InboundEvent): string {
+  if (event.roomType === "direct") return event.text;
+  return `${event.senderName} (@${event.senderName}): ${event.text}`;
 }

@@ -1,51 +1,51 @@
-# Openclaw Rocket.Chat Plugin — Roadmap
+# OpenClaw Rocket.Chat Plugin — Roadmap
 
-## Phase 1 — Reference Architecture Ports
-- [ ] **REST Client rewrite** — port `rc-api/rest-client.ts`: retry/backoff, user/room management, file upload, server info
-- [ ] **MessageHandler** — `!commands` (`!help`, `!reset`, `!new`, `!clear`, `!model`, `!status`), clean formatting, long message splitting
-- [ ] **BotManager** — unified multi-bot connection manager (all 7 accounts)
-- [ ] **CLI commands** — add-bot, add-user, add-group, invite, remove-user, setup, status, uninstall, upgrade
-- [ ] **CLI prompts** — ask, askPassword, confirm, select, multiSelect
-- [ ] **Credential system** — move auth to `~/.openclaw/credentials/rocketchat/` with 0o600, backups, optional AES encryption
+Active work only. Detailed plans live in PRs / design docs, not here.
 
-## Phase 2 — Features
-- [ ] **Thread context injection** — fetch parent + prior replies when mentioned in a thread
-- [ ] **Quotes Understanding** -- bot should understand quoted messages
-- [ ] **Room history injection** — fetch last N via REST on dispatch
-- [ ] **Config env-var substitution** — `${ENV_VAR}` in config strings
+# Cleanups
+- [ ] Logs and comments
 
-## Phase 4 — Mobile Testing
-- [ ] Test bot via mobile app (same WiFi or ngrok tunnel)
-- [ ] Verify session memory, typing indicator, reactions on mobile
-- [ ] Handle mobile-specific message formats (if any)
+## Commands shortcut
 
 
-## Phase 5 - Group Channels
+## In progress (this branch)
+- [ ] **Per-room concurrency cap** — N bots in one room on `@all` shouldn't blast the LLM
+- [ ] **User-facing error messages** — surface dispatch/upload failures to the user, not just logs
+- [ ] **Group members registry** — fetch + cache who's in each room, let the bot answer "is @bob here?"
 
-- [ ] Ephemeral bot messages for groups
-- [ ] Allow user to share messages of bot in the group and not if they don't want to
-- [ ] Allow everyone have access to the bot for specific skills
-- [ ] Bot shuld suggest members and user about what needs to be configured before they can start using it
-- [ ] Borrow and lend the openclaw bot
- 
+## Multi-bot (next up, fresh branch off main)
+- [ ] Multi-account setup (2+ bots in same room, verify both come up)
+- [ ] `displayName` + `agent` per account in config
+- [ ] Per-room bot registry (which bots are in which rooms)
+- [ ] Per-room `requireMention` config (strict vs casual rooms)
 
-## Phase 6 - Error handling and cleaning up the dead code and merging to main
-- [ ] Keep the main code up to date merged to avoid conflicts later
-- [ ] Media handling tightining up including voice instructions
-- [ ] Bot intellegent so it asks user to tell if something is missing or good to have to start doing something
-- [ ] Code review, SDK, Migration, Cleanups and good code approaches
-- [ ] Bot exec theek so it doesn't fail with basic shell commands running so have strict error handling logic and  bot should show whats wrong to user
-- [ ] Double messages firing shouldn't happen and bot shouldn't go crazy
-- [ ] Test with better models and config
+## CLI (port from `openclaw-rocketchat-master/src/cli/`)
+- [ ] `add-bot` — create RC user, save creds, auto-create DMs
+- [ ] `add-group` / `invite` — group + member management
+- [ ] `add-user` / `remove-user` — phone user CRUD
+- [ ] `status` / `upgrade` / `uninstall` / `setup` hardening
+- [ ] Credential system under `~/.openclaw/credentials/rocketchat/`
 
+## Quality (post-merge)
+- [ ] Test coverage (port 3 vitest files from master, add SSRF + mention + quoted-chain tests)
+- [ ] Schema codegen so `openclaw.plugin.json` blocks can't drift again
+- [ ] README update if it describes the old polling approach
+- [ ] Trim `AGENTS.md` (currently 21 lines, fine for now)
 
-## Phase 7
-- [ ] Avoid user exploitation 
-- [ ] Add concurrency for the bot
-- [ ] 
+## Defer (no RC public API)
+- ❌ Ephemeral / private messages visible to only one user in a group — RC schema rejects `private: true` on `sendMessage`
+- ❌ Hiding the user's own @mention message
 
-
-##  Final Phase - Leftovers
-- [ ] User manual collect in github readme
-- [ ] Npm package ready
-- [ ] E2E testing 
+## Done in `feat-DDP_Migration24thJuly` (this branch)
+- [x] DDP-based real-time inbound (replaced polling)
+- [x] Multi-model support
+- [x] File restructure (`src/service/`, `src/client/`, `src/config/`)
+- [x] Quoted messages in groups
+- [x] Typing indicator
+- [x] Strict mention filtering
+- [x] Sender-label prefix in group `Body` (`alice (@alice): @bot hi`)
+- [x] Group history tracking (last 10 skipped messages, embedded in body)
+- [x] `WasMentioned` flag in ctxPayload
+- [x] Processing-lock (prevents double-dispatch on duplicate `msg._id`)
+- [x] `!help` command
+- [x] `openclaw.plugin.json` schemas re-synced

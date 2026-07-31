@@ -5,7 +5,8 @@ import { CheckpointStore } from "../config/store.js";
 import { getMessageAttachmentInputs, normalizeInboundAttachments } from "./attachments.js";
 import { RocketChatDdpConnection } from "../client/ddp.js";
 import type { InboundEvent, RocketChatSubscriptionRecord, RocketChatMessageRecord } from "../types.js";
-import { shouldHandleInboundEvent } from "./channel.js";
+import { shouldHandleInboundEvent, matchCommand } from "./channel.js";
+import { appendGroupHistory, getAndClearGroupHistory } from "./group-history.js";
 import { dispatchInboundEventWithChannelRuntime } from "./inbound.js";
 import type {
   ResolvedAccount,
@@ -53,6 +54,7 @@ async function handleMessage(
   client: RocketChatClient,
   ddp: RocketChatDdpConnection | null,
   accountId: string,
+  identityUsername: string,
 ): Promise<void> {
   const replyTmid = event.tmid ?? undefined;
   const channelRuntime = ctx.channelRuntime;
@@ -64,10 +66,14 @@ async function handleMessage(
 
   await ddp?.sendTyping(event.roomId, true).catch(() => {});
 
+  const groupHistory = event.roomType === "direct" ? [] : getAndClearGroupHistory(accountId, event.roomId);
+
   await dispatchInboundEventWithChannelRuntime({
     cfg: (ctx.cfg ?? {}) as OpenClawConfigLike,
     accountId,
     event,
+    groupHistory,
+    identityUsername,
     channelRuntime,
     client,
     deliver: (payload, info) => sendReply(client, ddp, event.roomId, event.messageId, replyTmid, accountId, payload, info),
@@ -75,7 +81,8 @@ async function handleMessage(
       logger.error(`[rocketchat:${accountId}] failed to record inbound session: ${error instanceof Error ? error.message : String(error)}`);
     },
     onDispatchError: (error, info) => {
-      logger.error(`[rocketchat:${accountId}] ${info.kind} dispatch failed: ${error instanceof Error ? error.message : String(error)}`);
+      const detail = error instanceof Error ? `${error.message}\n${error.stack}` : JSON.stringify(error);
+      logger.error(`[rocketchat:${accountId}] ${info.kind} dispatch failed: ${detail}`);
     },
   });
 
@@ -154,6 +161,16 @@ async function startDdpGateway(
 
   const stateData = await checkpoint.read();
   const seenIds = new Set(stateData.recentMessageIds);
+  const processingMessages = new Set<string>();
+
+  const markSeen = async (msgId: string): Promise<void> => {
+    seenIds.add(msgId);
+    await checkpoint.write({
+      updatedSince: stateData.updatedSince,
+      recentMessageIds: [...seenIds].slice(-250),
+      failedMessages: stateData.failedMessages ?? [],
+    });
+  };
 
   const roomTypes = new Map<string, string>();
   try {
@@ -176,6 +193,7 @@ async function startDdpGateway(
     onError: (error) => logger.error(`[rocketchat:${accountId}] ddp error: ${error.message}`),
     onMessage: async (msg: RocketChatMessageRecord) => {
       if (shouldSkipMessage(msg, identity.userId, seenIds)) return;
+      if (processingMessages.has(msg._id)) return;
 
       const sub: RocketChatSubscriptionRecord = { rid: msg.rid, t: roomTypes.get(msg.rid) ?? "c" };
       const event = await toInboundEvent(accountId, sub, msg, account.serverUrl, client);
@@ -184,18 +202,36 @@ async function startDdpGateway(
         logger.info(`[rocketchat:${accountId}] quoted context (${event.quotedText.length} chars): "${event.quotedText.slice(0, 120)}"`);
       }
 
-      if (!shouldHandleInboundEvent(event, { botUserId: identity.userId, mentionNames })) return;
+      if (!shouldHandleInboundEvent(event, { botUserId: identity.userId, mentionNames })) {
+        if (event.roomType !== "direct") {
+          appendGroupHistory(accountId, event.roomId, {
+            sender: event.senderName,
+            body: event.text,
+            timestamp: Date.now(),
+          });
+        }
+        return;
+      }
 
-      seenIds.add(msg._id);
-      await checkpoint.write({
-        updatedSince: stateData.updatedSince,
-        recentMessageIds: [...seenIds].slice(-250),
-        failedMessages: stateData.failedMessages ?? [],
-      });
+      const cmdResult = matchCommand(event.text);
+      if (cmdResult.action === "reply") {
+        const sendCmd = connection?.sendMessage.bind(connection) ?? client.postMessage.bind(client);
+        const tmidOpt = event.tmid ? { tmid: event.tmid } : undefined;
+        try {
+          await sendCmd(event.roomId, cmdResult.replyText, tmidOpt);
+        } catch (err) {
+          logger.error(`[rocketchat:${accountId}] command reply failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        await markSeen(msg._id);
+        return;
+      }
+
+      await markSeen(msg._id);
 
       if (ctx.channelRuntime) {
+        processingMessages.add(msg._id);
         try {
-          await handleMessage(ctx, event, client, connection, accountId);
+          await handleMessage(ctx, event, client, connection, accountId, identity.username);
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err);
           logger.error(`[rocketchat:${accountId}] failed to handle message ${event.messageId}: ${reason}`);
@@ -207,6 +243,8 @@ async function startDdpGateway(
             failedAt: new Date().toISOString(),
             reason,
           });
+        } finally {
+          processingMessages.delete(msg._id);
         }
       } else {
         logger.error(`[rocketchat:${accountId}] channel runtime unavailable; inbound message ignored`);
@@ -261,7 +299,6 @@ async function toInboundEvent(
 ): Promise<InboundEvent> {
   const rawAttachments = getMessageAttachmentInputs(msg);
 
-  // Resolve quoted/reply context (walk the chain up to 4 levels deep)
   let quotedText: string | undefined;
   let nextQuotedId: string | null = msg.tmid ?? extractQuotedMessageId(msg) ?? null;
   const maxDepth = 4;

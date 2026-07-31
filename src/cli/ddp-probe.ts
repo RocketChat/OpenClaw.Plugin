@@ -4,7 +4,6 @@ import WebSocket, { type RawData } from "ws";
 
 loadDotEnv();
 
-// --- Hardcoded WebSocket URL (override via RC_WS_URL if needed) ---
 const WS_URL = process.env.RC_WS_URL ?? "ws://localhost:3000/websocket";
 
 const AUTH_TOKEN = process.env.RC_AUTH_TOKEN;
