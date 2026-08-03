@@ -34,3 +34,13 @@ export function getExt(name: string | undefined): string | undefined {
   if (dot <= 0 || dot === part.length - 1) return undefined;
   return part.slice(dot + 1);
 }
+
+export function extractQuotedMessageId(link: string): string | undefined {
+  try {
+    const url = new URL(link);
+    const msg = url.searchParams.get("msg");
+    return msg && msg.length > 0 ? msg : undefined;
+  } catch {
+    return undefined;
+  }
+}

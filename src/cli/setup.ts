@@ -112,7 +112,7 @@ async function main() {
   if (!botPassword || botPassword.length < 6) { fail("Exiting — valid password required"); process.exit(1); }
 
   info("Checking if bot already exists...");
-  let botUser: { _id: string; username: string; name: string };
+  let botUser: { _id: string; username: string };
   const existing = await getUserByUsername(rcUrl, adminAuth, botUsername);
 
   if (existing) {

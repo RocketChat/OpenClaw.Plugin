@@ -36,7 +36,6 @@ type DDPMessage = {
 function start(): void {
   let reconnectAttempts = 0;
   let watchdog: ReturnType<typeof setTimeout> | null = null;
-  let authenticated = false;
   let loginId: string | null = null;
 
   const connect = () => {
@@ -95,7 +94,6 @@ function start(): void {
           ws.close();
           return;
         }
-        authenticated = true;
         console.log("[probe] authenticated — subscribing to __my_messages__");
         ddpSend({
           msg: "sub",
@@ -132,7 +130,6 @@ function start(): void {
     ws.on("close", (code: number) => {
       if (watchdog) clearTimeout(watchdog);
       console.log(`[probe] socket closed (code ${code}) — reconnecting in ${RECONNECT_BASE_MS}ms`);
-      authenticated = false;
       loginId = null;
       const delay = reconnectAttempts === 0 ? 0 : Math.min(RECONNECT_BASE_MS * 2 ** (reconnectAttempts - 1), RECONNECT_MAX_MS);
       reconnectAttempts += 1;

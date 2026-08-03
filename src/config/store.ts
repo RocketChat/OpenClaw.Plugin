@@ -78,16 +78,4 @@ export class CheckpointStore {
       "DELETE FROM failed_messages WHERE message_id NOT IN (SELECT message_id FROM failed_messages ORDER BY rowid DESC LIMIT ?)",
     ).run(this.failureLimit);
   }
-
-  async hasSeen(messageId: string): Promise<boolean> {
-    const row = this.db.prepare("SELECT 1 FROM seen_messages WHERE id = ?").get(messageId);
-    return !!row;
-  }
-
-  async markSeen(messageId: string): Promise<void> {
-    this.db.prepare("INSERT OR IGNORE INTO seen_messages (id) VALUES (?)").run(messageId);
-    this.db.prepare(
-      "DELETE FROM seen_messages WHERE id NOT IN (SELECT id FROM seen_messages ORDER BY seen_at DESC LIMIT ?)",
-    ).run(this.limit);
-  }
 }

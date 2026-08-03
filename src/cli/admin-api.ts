@@ -31,7 +31,7 @@ async function adminFetch(baseUrl: string, path: string, opts: RCFetchOpts = {})
     headers["X-Auth-Token"] = opts.authToken;
     headers["X-User-Id"] = opts.userId;
   }
-  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}${path}`, {
+  const res = await fetch(new URL(path, baseUrl), {
     method: opts.method ?? "POST",
     headers,
     ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
@@ -79,7 +79,9 @@ export async function getUserByUsername(
   username: string,
 ): Promise<RCUser | null> {
   try {
-    const json = await adminFetch(baseUrl, `/api/v1/users.info?username=${encodeURIComponent(username)}`, {
+    const url = new URL("/api/v1/users.info", baseUrl);
+    url.searchParams.set("username", username);
+    const json = await adminFetch(baseUrl, url.toString(), {
       method: "GET",
       userId: auth.userId,
       authToken: auth.authToken,

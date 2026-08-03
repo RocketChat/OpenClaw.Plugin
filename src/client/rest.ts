@@ -1,7 +1,7 @@
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { randomUUID } from "node:crypto";
-import { resolveOpenClawDir, resolveUrl, getExt, getErrorMessage } from "../utils.js";
+import { extractQuotedMessageId, resolveOpenClawDir, resolveUrl, getExt, getErrorMessage } from "../utils.js";
 import ipaddr from "ipaddr.js";
 
 const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
@@ -11,7 +11,6 @@ import type {
   PluginAccountConfig,
   RocketChatIdentity,
   RocketChatSubscriptionRecord,
-  RocketChatMessageRecord,
   RocketChatClientOptions,
   JsonObject,
 } from "../types.js";
@@ -119,17 +118,10 @@ export class RocketChatClient {
     );
     const message = asObject(payload.message);
     const text = typeof message.msg === "string" && message.msg.length > 0 ? message.msg : null;
-    const attachments = Array.isArray(message.attachments) ? message.attachments : [];
-    let quotedId: string | null = null;
-    for (const att of attachments) {
-      const record = att as { message_link?: string };
-      const link = typeof record.message_link === "string" ? record.message_link : "";
-      const match = link.match(/[?&]msg=([A-Za-z0-9]+)/);
-      if (match) {
-        quotedId = match[1]!;
-        break;
-      }
-    }
+    const link = (Array.isArray(message.attachments) ? message.attachments : [])
+      .map((att) => (att as { message_link?: string }).message_link)
+      .find((l): l is string => typeof l === "string" && l.length > 0);
+    const quotedId = link ? extractQuotedMessageId(link) ?? null : null;
     return { text, quotedId };
   }
 
@@ -302,7 +294,7 @@ function isSafeExternalUrl(url: string, serverUrl: string): boolean {
 function isPrivateHostname(hostname: string): boolean {
   const lower = hostname.toLowerCase();
   if (lower === "localhost" || lower.endsWith(".local") || lower.endsWith(".internal")) return true;
-  const raw = lower.replace(/^\[|\]$/g, "");
+  const raw = lower.startsWith("[") && lower.endsWith("]") ? lower.slice(1, -1) : lower;
   try {
     const addr = ipaddr.parse(raw);
     return addr.range() !== "unicast";

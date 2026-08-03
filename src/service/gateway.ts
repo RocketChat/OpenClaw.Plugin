@@ -1,4 +1,4 @@
-import { resolveOpenClawDir } from "../utils.js";
+import { resolveOpenClawDir, extractQuotedMessageId } from "../utils.js";
 import { RocketChatClient } from "../client/rest.js";
 import { parsePluginConfig } from "../config/schema.js";
 import { CheckpointStore } from "../config/store.js";
@@ -155,7 +155,9 @@ async function startDdpGateway(
   generation: number,
 ): Promise<void> {
   const accountId = account.accountId;
-  const wsUrl = account.serverUrl.replace(/^http/i, "ws").replace(/\/+$/, "");
+  const wsBase = new URL(account.serverUrl);
+  wsBase.protocol = wsBase.protocol === "https:" ? "wss:" : "ws:";
+  const wsUrl = wsBase.toString().replace(/\/+$/, "");
   const reconnectDelayMs =
     account.transport.mode === "websocket" ? account.transport.reconnectDelayMs ?? 2_000 : 2_000;
 
@@ -300,7 +302,13 @@ async function toInboundEvent(
   const rawAttachments = getMessageAttachmentInputs(msg);
 
   let quotedText: string | undefined;
-  let nextQuotedId: string | null = msg.tmid ?? extractQuotedMessageId(msg) ?? null;
+  let nextQuotedId: string | null = msg.tmid ?? null;
+  if (!nextQuotedId) {
+    const link = (Array.isArray(msg.attachments) ? msg.attachments : [])
+      .map((att) => (att as { message_link?: string }).message_link)
+      .find((l): l is string => typeof l === "string" && l.length > 0);
+    nextQuotedId = link ? extractQuotedMessageId(link) ?? null : null;
+  }
   const maxDepth = 4;
   let depth = 0;
   while (nextQuotedId && client && depth < maxDepth) {
@@ -335,21 +343,14 @@ async function toInboundEvent(
   };
 }
 
-function extractQuotedMessageId(msg: import("../types.js").RocketChatMessageRecord): string | undefined {
-  const attachments = Array.isArray(msg.attachments) ? msg.attachments : [];
-  for (const att of attachments) {
-    const record = att as { message_link?: string };
-    const link = typeof record.message_link === "string" ? record.message_link : "";
-    const match = link.match(/[?&]msg=([A-Za-z0-9]+)/);
-    if (match) return match[1];
-  }
-  return undefined;
-}
-
 function isQuoteLinkOnly(text: string): boolean {
   const trimmed = text.trim();
   if (!trimmed.startsWith("[ ](") && !trimmed.startsWith("[![](")) return false;
-  return /[?&]msg=[A-Za-z0-9]+/.test(trimmed);
+  const open = trimmed.lastIndexOf("(");
+  const close = trimmed.lastIndexOf(")");
+  if (open === -1 || close <= open) return false;
+  const url = trimmed.slice(open + 1, close);
+  return extractQuotedMessageId(url) !== undefined;
 }
 
 function mapRoomType(t: string | undefined): InboundEvent["roomType"] {
