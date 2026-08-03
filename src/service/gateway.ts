@@ -285,8 +285,9 @@ function shouldSkipMessage(
   seenIds: Set<string>,
 ): boolean {
   if (!msg._id) return true;
-  if (msg.t && getMessageAttachmentInputs(msg).length === 0) return true;
-  if ((!msg.msg || msg.msg.trim().length === 0) && getMessageAttachmentInputs(msg).length === 0) return true;
+  const hasAttachments = getMessageAttachmentInputs(msg).length > 0;
+  if (msg.t && !hasAttachments) return true;
+  if ((!msg.msg || msg.msg.trim().length === 0) && !hasAttachments) return true;
   if (msg.u?._id === botUserId) return true;
   if (seenIds.has(msg._id)) return true;
   return false;
