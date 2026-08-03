@@ -2,7 +2,7 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { randomUUID } from "node:crypto";
 import { extractQuotedMessageId, resolveOpenClawDir, resolveUrl, getExt, getErrorMessage } from "../utils.js";
-import ipaddr from "ipaddr.js";
+import { isPrivateOrLoopbackHost } from "openclaw/plugin-sdk/ssrf-runtime";
 
 const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
 const ALLOWED_DOWNLOAD_MIME_PREFIXES = ["image/", "audio/", "video/", "application/"];
@@ -294,13 +294,7 @@ function isSafeExternalUrl(url: string, serverUrl: string): boolean {
 function isPrivateHostname(hostname: string): boolean {
   const lower = hostname.toLowerCase();
   if (lower === "localhost" || lower.endsWith(".local") || lower.endsWith(".internal")) return true;
-  const raw = lower.startsWith("[") && lower.endsWith("]") ? lower.slice(1, -1) : lower;
-  try {
-    const addr = ipaddr.parse(raw);
-    return addr.range() !== "unicast";
-  } catch {
-    return false;
-  }
+  return isPrivateOrLoopbackHost(lower);
 }
 
 function asObject(value: unknown): JsonObject {

@@ -1,23 +1,6 @@
-import { resolveUrl, getExt } from "../utils.js";
+import { resolveUrl } from "../utils.js";
 import type { InboundAttachment, InboundAttachmentKind, AttachmentRecord } from "../types.js";
-
-const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "tif"]);
-const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "mkv", "webm", "avi", "m4v"]);
-const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "ogg", "oga", "opus", "wav", "flac", "aac", "amr", "weba"]);
-const DOCUMENT_EXTENSIONS = new Set(["pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "txt", "md", "csv", "json"]);
-const DOCUMENT_MIME_TYPES = new Set([
-  "application/pdf",
-  "application/msword",
-  "application/vnd.ms-excel",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/json",
-  "text/csv",
-  "text/markdown",
-  "text/plain",
-]);
+import { mediaKindFromMime, mimeTypeFromFilePath } from "openclaw/plugin-sdk/media-mime";
 
 export function getMessageAttachmentInputs(message: {
   attachments?: unknown[];
@@ -127,17 +110,9 @@ function getFileName(record: AttachmentRecord | null, url: string | undefined): 
 }
 
 function classify(mimeType: string | undefined, fileName: string | undefined): InboundAttachmentKind {
-  if (mimeType?.startsWith("image/")) return "image";
-  if (mimeType?.startsWith("audio/")) return "audio";
-  if (mimeType?.startsWith("video/")) return "video";
-  if (mimeType?.startsWith("text/") || (mimeType && DOCUMENT_MIME_TYPES.has(mimeType))) return "document";
-  const ext = getExt(fileName);
-  if (!ext) return "unknown";
-  if (IMAGE_EXTENSIONS.has(ext)) return "image";
-  if (AUDIO_EXTENSIONS.has(ext)) return "audio";
-  if (VIDEO_EXTENSIONS.has(ext)) return "video";
-  if (DOCUMENT_EXTENSIONS.has(ext)) return "document";
-  return "unknown";
+  const mime = mimeType ?? (fileName ? mimeTypeFromFilePath(fileName) : undefined);
+  const kind = mime ? mediaKindFromMime(mime) : undefined;
+  return kind ?? "unknown";
 }
 
 
