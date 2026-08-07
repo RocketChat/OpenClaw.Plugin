@@ -3,6 +3,7 @@ import { RocketChatClient } from "../client/rest.js";
 import { parsePluginConfig } from "../config/schema.js";
 import { CheckpointStore } from "../config/store.js";
 import { getMessageAttachmentInputs, normalizeInboundAttachments } from "./attachments.js";
+import { RoomQueue } from "./room-queue.js";
 import { RocketChatDdpConnection } from "../client/ddp.js";
 import type { InboundEvent, RocketChatSubscriptionRecord, RocketChatMessageRecord } from "../types.js";
 import { shouldHandleInboundEvent, matchCommand } from "./channel.js";
@@ -141,8 +142,9 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
   const checkpointPath = `${stateDir}/rocketchat/${account.accountId}.db`;
   const checkpoint = new CheckpointStore(checkpointPath, 250);
   const mentionNames = dedupeMentions([identity.username, ...account.mentionNames]);
+  const roomQueue = new RoomQueue();
 
-  return startDdpGateway(ctx, account, identity, client, checkpoint, mentionNames, generation);
+  return startDdpGateway(ctx, account, identity, client, checkpoint, mentionNames, generation, roomQueue);
 }
 
 async function startDdpGateway(
@@ -153,6 +155,7 @@ async function startDdpGateway(
   checkpoint: CheckpointStore,
   mentionNames: string[],
   generation: number,
+  roomQueue: RoomQueue,
 ): Promise<void> {
   const accountId = account.accountId;
   const wsBase = new URL(account.serverUrl);
@@ -230,8 +233,14 @@ async function startDdpGateway(
 
       await markSeen(msg._id);
 
-      if (ctx.channelRuntime) {
-        processingMessages.add(msg._id);
+      if (!ctx.channelRuntime) {
+        logger.error(`[rocketchat:${accountId}] channel runtime unavailable; inbound message ignored`);
+        return;
+      }
+
+      if (processingMessages.has(msg._id)) return;
+      processingMessages.add(msg._id);
+      roomQueue.enqueue(event.roomId, async () => {
         try {
           await handleMessage(ctx, event, client, connection, accountId, identity.username);
         } catch (err) {
@@ -245,12 +254,9 @@ async function startDdpGateway(
             failedAt: new Date().toISOString(),
             reason,
           });
-        } finally {
-          processingMessages.delete(msg._id);
         }
-      } else {
-        logger.error(`[rocketchat:${accountId}] channel runtime unavailable; inbound message ignored`);
-      }
+      });
+      processingMessages.delete(msg._id);
     },
   });
 

@@ -73,6 +73,58 @@ export async function createBotUser(
   return { _id: extractString(userRecord, "_id"), username: extractString(userRecord, "username"), name: extractString(userRecord, "name") };
 }
 
+export async function getUserRoles(baseUrl: string, auth: RCLoginResult, username: string): Promise<string[] | null> {
+  const url = new URL("/api/v1/users.info", baseUrl);
+  url.searchParams.set("username", username);
+  const json = await adminFetch(baseUrl, url.toString(), {
+    method: "GET",
+    userId: auth.userId,
+    authToken: auth.authToken,
+  });
+  const user = json.user as { roles?: string[] } | undefined;
+  return user?.roles ?? null;
+}
+
+export type VerifyAdminResult =
+  | { ok: true }
+  | { ok: false; reason: "not-admin" }
+  | { ok: false; reason: "unauthorized" }
+  | { ok: false; reason: "unreachable" };
+
+export async function verifyAdmin(baseUrl: string, auth: RCLoginResult): Promise<VerifyAdminResult> {
+  let roles: string[] | null;
+  try {
+    roles = await getUserRoles(baseUrl, auth, auth.userId);
+  } catch (e: unknown) {
+    if (e instanceof RocketChatClientError && /401|unauthorized/i.test(e.message)) {
+      return { ok: false, reason: "unauthorized" };
+    }
+    return { ok: false, reason: "unreachable" };
+  }
+
+  if (roles) {
+    return roles.includes("admin") ? { ok: true } : { ok: false, reason: "not-admin" };
+  }
+
+
+  try {
+    const url = new URL("/api/v1/users.info", baseUrl);
+    url.searchParams.set("userId", auth.userId);
+    const json = await adminFetch(baseUrl, url.toString(), {
+      method: "GET",
+      userId: auth.userId,
+      authToken: auth.authToken,
+    });
+    const user = json.user as { roles?: string[] } | undefined;
+    return user?.roles?.includes("admin") ? { ok: true } : { ok: false, reason: "not-admin" };
+  } catch (e: unknown) {
+    if (e instanceof RocketChatClientError && /401|unauthorized/i.test(e.message)) {
+      return { ok: false, reason: "unauthorized" };
+    }
+    return { ok: false, reason: "unreachable" };
+  }
+}
+
 export async function getUserByUsername(
   baseUrl: string,
   auth: RCLoginResult,
@@ -109,4 +161,59 @@ export async function sendMessage(baseUrl: string, auth: RCLoginResult, roomId: 
     authToken: auth.authToken,
     body: { roomId, text },
   });
+}
+
+export interface RocketChatGroup {
+  _id: string;
+  name: string;
+ 
+  isPrivate?: boolean;
+}
+
+
+export async function listGroups(baseUrl: string, auth: RCLoginResult, count = 100): Promise<RocketChatGroup[]> {
+  const json = await adminFetch(baseUrl, `/api/v1/groups.list?count=${count}`, {
+    method: "GET",
+    userId: auth.userId,
+    authToken: auth.authToken,
+  });
+  const groups = (json.groups as Array<{ _id: string; name: string; t?: string }>) ?? [];
+  return groups
+    .filter((g) => g.name && g.name !== g._id)
+    .map((g) => ({ _id: g._id, name: g.name, isPrivate: g.t === "p" }));
+}
+
+
+export async function getGroupByName(baseUrl: string, auth: RCLoginResult, name: string): Promise<RocketChatGroup | null> {
+  try {
+    const url = new URL("/api/v1/groups.info", baseUrl);
+    url.searchParams.set("name", name);
+    const json = await adminFetch(baseUrl, url.toString(), {
+      method: "GET",
+      userId: auth.userId,
+      authToken: auth.authToken,
+    });
+    const group = json.group as { _id: string; name?: string; t?: string } | undefined;
+    if (!group?._id) return null;
+    return { _id: group._id, name: group.name ?? name, isPrivate: group.t === "p" };
+  } catch {
+    return null;
+  }
+}
+
+export async function inviteToGroup(baseUrl: string, auth: RCLoginResult, groupId: string, username: string): Promise<void> {
+  await adminFetch(baseUrl, "/api/v1/groups.invite", {
+    userId: auth.userId,
+    authToken: auth.authToken,
+    body: { roomId: groupId, username },
+  });
+}
+
+export async function checkServerHealth(baseUrl: string): Promise<boolean> {
+  try {
+    const res = await fetch(new URL("/api/info", baseUrl), { method: "GET" });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

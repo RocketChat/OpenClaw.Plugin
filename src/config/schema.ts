@@ -16,9 +16,6 @@ const transportSchema = z.preprocess(
   (value) => value ?? { mode: "websocket" },
   z.discriminatedUnion("mode", [
     z.object({
-      mode: z.literal("polling"),
-    }).strict(),
-    z.object({
       mode: z.literal("websocket"),
       reconnectDelayMs: z.number().int().positive().default(2_000),
     }).strict(),

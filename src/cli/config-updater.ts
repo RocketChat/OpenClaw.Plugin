@@ -5,7 +5,7 @@ import type { AuthCredentials, JsonObject } from "../types.js";
 
 const OC_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
 
-/** Config updater only writes token auth (CLI setup always resolves to a token) */
+
 type TokenAuth = Extract<AuthCredentials, { mode: "token" }>;
 
 function readConfig(): JsonObject {
@@ -19,14 +19,48 @@ function writeConfig(cfg: JsonObject): void {
   renameSync(tmp, OC_CONFIG_PATH);
 }
 
+export type ExistingAccount = {
+  accountId: string;
+  serverUrl: string;
+  mentionNames: string[];
+  auth: TokenAuth;
+};
+
+
+export function readAccount(accountId = "main"): ExistingAccount | null {
+  const cfg = readConfig() as Record<string, any>;
+  const account = cfg?.channels?.rocketchat?.accounts?.[accountId];
+  if (!account || typeof account !== "object") return null;
+  const serverUrl = typeof account.serverUrl === "string" ? account.serverUrl : "";
+  const auth = account.auth;
+  if (!serverUrl || !auth || auth.mode !== "token") return null;
+  if (typeof auth.userId !== "string" || typeof auth.accessToken !== "string") return null;
+  if (!auth.userId || !auth.accessToken) return null;
+  const mentionNames = Array.isArray(account.mentionNames)
+    ? account.mentionNames.filter((n: unknown): n is string => typeof n === "string" && n.length > 0)
+    : [];
+  return {
+    accountId,
+    serverUrl,
+    mentionNames,
+    auth: { mode: "token", userId: auth.userId, accessToken: auth.accessToken },
+  };
+}
+
+function normalizeMention(name: string): string {
+  return name.trim().replace(/^@+/, "");
+}
+
 export function updateConfig(opts: {
   pluginPath: string;
   pluginId: string;
   accountId: string;
   serverUrl: string;
-  transport?: { mode: string };
+  transport?: { mode: "websocket" };
   mentionNames?: string[];
   auth: TokenAuth;
+
+  replaceConnection?: boolean;
 }) {
   const cfg = readConfig() as Record<string, any>;
 
@@ -45,12 +79,30 @@ export function updateConfig(opts: {
   if (!cfg.channels.rocketchat) cfg.channels.rocketchat = {};
   if (!cfg.channels.rocketchat.accounts) cfg.channels.rocketchat.accounts = {};
 
-  cfg.channels.rocketchat.accounts[opts.accountId] = {
+  const accounts = cfg.channels.rocketchat.accounts as Record<string, any>;
+  const existing = accounts[opts.accountId] as Record<string, any> | undefined;
+
+  const existingMentions = Array.isArray(existing?.mentionNames)
+    ? existing.mentionNames.map((n: unknown) => (typeof n === "string" ? normalizeMention(n) : "")).filter(Boolean)
+    : [];
+  const incomingMentions = (opts.mentionNames ?? []).map(normalizeMention).filter(Boolean);
+  const mergedMentions = [...existingMentions];
+  for (const m of incomingMentions) {
+    if (!mergedMentions.includes(m)) mergedMentions.push(m);
+  }
+
+
+  const serverUrl = opts.replaceConnection ? opts.serverUrl : (existing?.serverUrl ?? opts.serverUrl);
+  const auth = opts.replaceConnection
+    ? { mode: "token" as const, userId: opts.auth.userId, accessToken: opts.auth.accessToken }
+    : (existing?.auth ?? { mode: "token" as const, userId: opts.auth.userId, accessToken: opts.auth.accessToken });
+
+  accounts[opts.accountId] = {
     enabled: true,
-    serverUrl: opts.serverUrl,
-    auth: { mode: "token", userId: opts.auth.userId, accessToken: opts.auth.accessToken },
-    transport: opts.transport ?? { mode: "websocket" },
-    mentionNames: opts.mentionNames ?? [],
+    serverUrl,
+    auth,
+    transport: existing?.transport ?? opts.transport ?? { mode: "websocket" },
+    mentionNames: opts.replaceConnection ? incomingMentions : mergedMentions,
   };
 
   writeConfig(cfg);

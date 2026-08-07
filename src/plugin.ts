@@ -14,7 +14,7 @@ export const rocketchatPlugin = createChatChannelPlugin<ResolvedAccount>({
       label: "Rocket.Chat",
       selectionLabel: "Rocket.Chat",
       docsPath: "https://rocket.chat/docs",
-      blurb: "Rocket.Chat channel plugin with REST polling outbound/inbound",
+      blurb: "Rocket.Chat channel plugin with DDP/websocket outbound/inbound",
       aliases: ["rc"],
     },
     capabilities: { chatTypes: ["direct", "group", "channel"] },

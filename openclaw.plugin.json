@@ -1,7 +1,7 @@
 {
   "id": "rocketchat",
   "name": "Rocket.Chat",
-  "description": "Rocket.Chat channel plugin with REST polling outbound/inbound",
+  "description": "Rocket.Chat channel plugin with DDP/websocket outbound/inbound",
   "version": "1.0.0",
   "kind": "channel",
   "channels": ["rocketchat"],
@@ -46,14 +46,6 @@
                 "transport": {
                   "type": "object",
                   "oneOf": [
-                    {
-                      "type": "object",
-                      "additionalProperties": false,
-                      "properties": {
-                        "mode": { "const": "polling" }
-                      },
-                      "required": ["mode"]
-                    },
                     {
                       "type": "object",
                       "additionalProperties": false,
@@ -117,14 +109,6 @@
             "transport": {
               "type": "object",
               "oneOf": [
-                {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "properties": {
-                    "mode": { "const": "polling" }
-                  },
-                  "required": ["mode"]
-                },
                 {
                   "type": "object",
                   "additionalProperties": false,

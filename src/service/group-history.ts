@@ -6,10 +6,6 @@ export type GroupHistoryEntry = {
 
 const MAX_GROUP_HISTORY_ENTRIES = 10;
 
-// Intentional ephemeral cache: holds recent group-chat messages so the LLM has
-// nearby context when it's mentioned. Deliberately in-memory only — it is lost on
-// restart and that is acceptable (it's short-term conversational context, not data
-// we need to persist). If durability becomes important, back this with sqlite.
 const store = new Map<string, GroupHistoryEntry[]>();
 
 function key(accountId: string, roomId: string): string {

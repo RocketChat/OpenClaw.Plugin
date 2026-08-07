@@ -19,16 +19,13 @@ export function shouldHandleInboundEvent(
     options.mentionNames.map((a) => a.trim().replace(/^@+/, "").toLowerCase()),
   );
 
-  // Check server-parsed mentions array (authoritative)
-  // RC populates this when a user is @mentioned — skip broadcast mentions
   for (const mention of event.mentions) {
     const name = mention.toLowerCase();
     if (BROADCAST_MENTIONS.has(name)) continue;
     if (aliases.has(name)) return true;
   }
 
-  // Fallback: check raw text for @alias (covers clients/plugins that
-  // don't populate the mentions array)
+
   const normalizedText = event.text.toLowerCase();
   for (const alias of aliases) {
     if (normalizedText.includes(`@${alias}`)) return true;
