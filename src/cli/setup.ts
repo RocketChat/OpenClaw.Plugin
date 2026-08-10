@@ -2,8 +2,8 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 
-import { loginAs, createBotUser, getUserByUsername, createDirectMessage, sendMessage, verifyAdmin, checkServerHealth, listGroups, inviteToGroup, getGroupByName, type RocketChatGroup } from "./admin-api.js";
-import { updateConfig, readAccount } from "./config-updater.js";
+import { loginAs, createBotUser, getUserByUsername, createDirectMessage, sendMessage, verifyAdmin, checkServerHealth, inviteToGroup, getGroupByName } from "./admin-api.js";
+import { updateConfig, readAccount, readAgentsList, addBinding } from "./config-updater.js";
 import { saveAdmin, loadAdmin, saveBotCredentials, loadBotCredentials } from "./credentials.js";
 import {
   color,
@@ -348,6 +348,26 @@ export async function runSetup(): Promise<void> {
     p.log.warn(`Skipped openclaw.json update: ${message}`);
   }
 
+  p.log.step("Agent binding");
+
+  const agents = readAgentsList();
+  if (agents.length > 0) {
+    const defaultAgent = agents.find((a) => a.id === "main") ?? agents[0]!;
+    try {
+      addBinding({
+        channel: "rocketchat",
+        accountId: ACCOUNT_ID,
+        agentId: defaultAgent.id,
+      });
+      p.log.success(`Bound @${botUsername} to agent '${defaultAgent.id}'`);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      p.log.warn(`Could not create binding: ${message}`);
+    }
+  } else {
+    p.log.warn("No agents found. Create one with `openclaw agents add <name>`, then restart.");
+  }
+
   printSummary([
     { label: "Server", value: rcUrl },
     { label: "Bot", value: `@${botUsername} ${color.dim(`(${botUser._id})`)}` },
@@ -387,45 +407,43 @@ export async function runSetup(): Promise<void> {
   });
 
   if (addToGroup && adminAuth) {
-    try {
-      const groups = await withSpinner("Loading groups", () => listGroups(rcUrl, adminAuth!));
-      if (groups.length === 0) {
-        p.log.info("No groups found. You can add the bot later with `openclaw rocketchat add-group`.");
-      } else {
-        const selectOptions = [
-          ...groups.map((g: RocketChatGroup) => ({
-            value: g._id,
-            label: g.isPrivate ? `${g.name} 🔒` : g.name,
-          })),
-          { value: "__manual__", label: "➕ Type a group name manually" },
-        ];
-        const choice = await promptSelect<string>({
-          message: "Select a group/channel to invite the bot to",
-          options: selectOptions,
-        });
+    p.log.step("Add to group");
+    while (true) {
+      const typedName = await promptText({
+        message: `Which group should @${botUsername} join? (Enter name, or leave empty to skip)`,
+        validate: () => undefined,
+      });
 
-        let group: RocketChatGroup | null = null;
-        if (choice === "__manual__") {
-          const typedName = await promptText({
-            message: "Enter the group/channel name",
-            validate: (v) => ((v ?? "").trim() ? undefined : "Name is required"),
-          });
-          group = await getGroupByName(rcUrl, adminAuth!, typedName.trim());
-          if (!group) {
-            p.log.warn(`Group "${typedName}" not found on Rocket.Chat.`);
-          }
-        } else {
-          group = groups.find((g) => g._id === choice) ?? null;
-        }
-
-        if (group) {
-          await withSpinner("Inviting bot", () => inviteToGroup(rcUrl, adminAuth!, group!._id, botUsername));
-          p.log.success(`Added @${botUsername} to #${group.name}`);
-        }
+      const trimmed = (typedName ?? "").trim();
+      if (!trimmed) {
+        p.log.info("Skipped group invite. You can add the bot later with `openclaw rocketchat add-group`.");
+        break;
       }
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      p.log.warn(`Could not add bot to group: ${message}`);
+
+      try {
+        const group = await getGroupByName(rcUrl, adminAuth!, trimmed);
+        if (!group) {
+          p.log.warn(`Group "${trimmed}" not found. Try again or leave empty to skip.`);
+          continue;
+        }
+
+        const confirm = await promptConfirm({
+          message: `Add @${botUsername} to #${group.name}?`,
+          initialValue: true,
+        });
+        if (!confirm) {
+          p.log.info("Skipped group invite.");
+          break;
+        }
+
+        await withSpinner("Inviting bot", () => inviteToGroup(rcUrl, adminAuth!, group._id, botUsername, group.isPrivate ?? false));
+        p.log.success(`Added @${botUsername} to #${group.name}`);
+        break;
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        p.log.warn(`Could not add bot to group: ${message}`);
+        break;
+      }
     }
   }
 

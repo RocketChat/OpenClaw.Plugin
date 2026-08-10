@@ -3,7 +3,6 @@ import { RocketChatClient } from "../client/rest.js";
 import { parsePluginConfig } from "../config/schema.js";
 import { CheckpointStore } from "../config/store.js";
 import { getMessageAttachmentInputs, normalizeInboundAttachments } from "./attachments.js";
-import { RoomQueue } from "./room-queue.js";
 import { RocketChatDdpConnection } from "../client/ddp.js";
 import type { InboundEvent, RocketChatSubscriptionRecord, RocketChatMessageRecord } from "../types.js";
 import { shouldHandleInboundEvent, matchCommand } from "./channel.js";
@@ -25,6 +24,8 @@ const MAX_ATTACHMENTS = 5;
 export type ClientEntry = { client: RocketChatClient; generation: number; wakeup: () => void };
 export const activeClients = new Map<string, ClientEntry>();
 let nextGeneration = 0;
+
+
 
 let logger: { info: (msg: string) => void; error: (msg: string) => void } = {
   info: (msg: string) => console.log(`[RC] ${msg}`),
@@ -142,9 +143,8 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
   const checkpointPath = `${stateDir}/rocketchat/${account.accountId}.db`;
   const checkpoint = new CheckpointStore(checkpointPath, 250);
   const mentionNames = dedupeMentions([identity.username, ...account.mentionNames]);
-  const roomQueue = new RoomQueue();
 
-  return startDdpGateway(ctx, account, identity, client, checkpoint, mentionNames, generation, roomQueue);
+  return startDdpGateway(ctx, account, identity, client, checkpoint, mentionNames, generation);
 }
 
 async function startDdpGateway(
@@ -155,7 +155,6 @@ async function startDdpGateway(
   checkpoint: CheckpointStore,
   mentionNames: string[],
   generation: number,
-  roomQueue: RoomQueue,
 ): Promise<void> {
   const accountId = account.accountId;
   const wsBase = new URL(account.serverUrl);
@@ -218,6 +217,19 @@ async function startDdpGateway(
         return;
       }
 
+      if (event.roomType !== "direct" && isSenderDenied(event.senderName, account.allowedUsers)) {
+        const sendCmd = connection?.sendMessage.bind(connection) ?? client.postMessage.bind(client);
+        const tmidOpt = event.tmid ? { tmid: event.tmid } : undefined;
+        const replyText = `**@${event.senderName}**: You don't have access to use this bot. Contact a group admin or the bot owner.`;
+        try {
+          await sendCmd(event.roomId, replyText, tmidOpt);
+        } catch (err) {
+          logger.error(`[rocketchat:${accountId}] access denied reply failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        await markSeen(msg._id);
+        return;
+      }
+
       const cmdResult = matchCommand(event.text);
       if (cmdResult.action === "reply") {
         const sendCmd = connection?.sendMessage.bind(connection) ?? client.postMessage.bind(client);
@@ -240,23 +252,22 @@ async function startDdpGateway(
 
       if (processingMessages.has(msg._id)) return;
       processingMessages.add(msg._id);
-      roomQueue.enqueue(event.roomId, async () => {
-        try {
-          await handleMessage(ctx, event, client, connection, accountId, identity.username);
-        } catch (err) {
-          const reason = err instanceof Error ? err.message : String(err);
-          logger.error(`[rocketchat:${accountId}] failed to handle message ${event.messageId}: ${reason}`);
-          await checkpoint.recordFailure({
-            messageId: event.messageId,
-            roomId: event.roomId,
-            senderName: event.senderName,
-            sentAt: event.sentAt,
-            failedAt: new Date().toISOString(),
-            reason,
-          });
-        }
-      });
-      processingMessages.delete(msg._id);
+      try {
+        await handleMessage(ctx, event, client, connection, accountId, identity.username);
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        logger.error(`[rocketchat:${accountId}] failed to handle message ${event.messageId}: ${reason}`);
+        await checkpoint.recordFailure({
+          messageId: event.messageId,
+          roomId: event.roomId,
+          senderName: event.senderName,
+          sentAt: event.sentAt,
+          failedAt: new Date().toISOString(),
+          reason,
+        });
+      } finally {
+        processingMessages.delete(msg._id);
+      }
     },
   });
 
@@ -283,6 +294,12 @@ async function startDdpGateway(
     }
     ctx.setStatus?.("stopped");
   }
+}
+
+function isSenderDenied(senderName: string, allowedUsers: string[]): boolean {
+  if (!allowedUsers || allowedUsers.length === 0) return false;
+  const norm = senderName.toLowerCase().replace(/^@+/, "");
+  return !allowedUsers.some((u) => u.trim().replace(/^@+/, "").toLowerCase() === norm);
 }
 
 function shouldSkipMessage(

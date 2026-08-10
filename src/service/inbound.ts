@@ -24,6 +24,10 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     },
   });
 
+  // Per-bot session isolation: multiple bots bound to the same agent
+  // get separate conversation histories by including bot identity in the key.
+  const botAwareSessionKey = `${route.sessionKey}:${params.identityUsername}`;
+
   const storePath = params.channelRuntime.session.resolveStorePath(
     params.cfg.session?.store,
     { agentId: route.agentId },
@@ -31,7 +35,7 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
 
   const previousTimestamp = params.channelRuntime.session.readSessionUpdatedAt({
     storePath,
-    sessionKey: route.sessionKey,
+    sessionKey: botAwareSessionKey,
   });
 
   const envelopeOptions = params.channelRuntime.reply.resolveEnvelopeFormatOptions(params.cfg);
@@ -56,7 +60,7 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     CommandBody: params.event.text,
     From: buildSenderAddress(params.event),
     To: to,
-    SessionKey: route.sessionKey,
+    SessionKey: botAwareSessionKey,
     AccountId: route.accountId ?? params.accountId,
     ChatType: params.event.roomType,
     ConversationLabel: buildConversationLabel(params.event),
@@ -75,10 +79,10 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
 
   await params.channelRuntime.session.recordInboundSession({
     storePath,
-    sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+    sessionKey: ctxPayload.SessionKey ?? botAwareSessionKey,
     ctx: ctxPayload,
     updateLastRoute: {
-      sessionKey: route.mainSessionKey ?? route.sessionKey,
+      sessionKey: route.mainSessionKey ?? botAwareSessionKey,
       channel: "rocketchat",
       to,
       accountId: route.accountId ?? params.accountId,

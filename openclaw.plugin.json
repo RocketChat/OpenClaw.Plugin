@@ -58,6 +58,7 @@
                   ]
                 },
                 "mentionNames": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+                "allowedUsers": { "type": "array", "items": { "type": "string" } },
                 "agent": { "type": "string", "minLength": 1 }
               },
               "required": ["enabled", "serverUrl"]

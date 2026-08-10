@@ -185,24 +185,38 @@ export async function listGroups(baseUrl: string, auth: RCLoginResult, count = 1
 
 
 export async function getGroupByName(baseUrl: string, auth: RCLoginResult, name: string): Promise<RocketChatGroup | null> {
-  try {
-    const url = new URL("/api/v1/groups.info", baseUrl);
-    url.searchParams.set("name", name);
-    const json = await adminFetch(baseUrl, url.toString(), {
-      method: "GET",
-      userId: auth.userId,
-      authToken: auth.authToken,
-    });
-    const group = json.group as { _id: string; name?: string; t?: string } | undefined;
-    if (!group?._id) return null;
-    return { _id: group._id, name: group.name ?? name, isPrivate: group.t === "p" };
-  } catch {
-    return null;
+  for (const endpoint of ["/api/v1/groups.info", "/api/v1/channels.info"]) {
+    try {
+      const url = new URL(endpoint, baseUrl);
+      url.searchParams.set("roomName", name);
+      const json = await adminFetch(baseUrl, url.toString(), {
+        method: "GET",
+        userId: auth.userId,
+        authToken: auth.authToken,
+      });
+      const group = (json.group ?? json.channel) as { _id: string; name?: string; t?: string } | undefined;
+      if (group?._id) {
+        return { _id: group._id, name: group.name ?? name, isPrivate: group.t === "p" };
+      }
+    } catch {
+      // try next endpoint
+    }
   }
+  return null;
 }
 
-export async function inviteToGroup(baseUrl: string, auth: RCLoginResult, groupId: string, username: string): Promise<void> {
-  await adminFetch(baseUrl, "/api/v1/groups.invite", {
+export async function kickFromGroup(baseUrl: string, auth: RCLoginResult, groupId: string, username: string, isPrivate = true): Promise<void> {
+  const endpoint = isPrivate ? "/api/v1/groups.kick" : "/api/v1/channels.kick";
+  await adminFetch(baseUrl, endpoint, {
+    userId: auth.userId,
+    authToken: auth.authToken,
+    body: { roomId: groupId, username },
+  });
+}
+
+export async function inviteToGroup(baseUrl: string, auth: RCLoginResult, groupId: string, username: string, isPrivate = true): Promise<void> {
+  const endpoint = isPrivate ? "/api/v1/groups.invite" : "/api/v1/channels.invite";
+  await adminFetch(baseUrl, endpoint, {
     userId: auth.userId,
     authToken: auth.authToken,
     body: { roomId: groupId, username },

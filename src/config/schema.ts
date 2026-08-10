@@ -18,6 +18,7 @@ const transportSchema = z.preprocess(
     z.object({
       mode: z.literal("websocket"),
       reconnectDelayMs: z.number().int().positive().default(2_000),
+      maxConcurrent: z.number().int().positive().default(4),
     }).strict(),
   ]),
 );
@@ -29,6 +30,7 @@ const accountSchema = z.object({
   transport: transportSchema,
   mentionNames: z.array(z.string().min(1)).default([]),
   agent: z.string().min(1).optional(),
+  allowedUsers: z.array(z.string().min(1)).default([]),
 }).strict();
 
 const pluginConfigSchema = z.object({

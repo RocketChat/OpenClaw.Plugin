@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, renameSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import type { AuthCredentials, JsonObject } from "../types.js";
@@ -26,6 +26,15 @@ export type ExistingAccount = {
   auth: TokenAuth;
 };
 
+
+export function readAllAccounts(): ExistingAccount[] {
+  const cfg = readConfig() as Record<string, any>;
+  const accounts = cfg?.channels?.rocketchat?.accounts;
+  if (!accounts || typeof accounts !== "object") return [];
+  return Object.keys(accounts)
+    .map((id) => readAccount(id))
+    .filter((a): a is ExistingAccount => a !== null);
+}
 
 export function readAccount(accountId = "main"): ExistingAccount | null {
   const cfg = readConfig() as Record<string, any>;
@@ -98,6 +107,7 @@ export function updateConfig(opts: {
     : (existing?.auth ?? { mode: "token" as const, userId: opts.auth.userId, accessToken: opts.auth.accessToken });
 
   accounts[opts.accountId] = {
+    ...(existing ?? {}),
     enabled: true,
     serverUrl,
     auth,
@@ -105,5 +115,179 @@ export function updateConfig(opts: {
     mentionNames: opts.replaceConnection ? incomingMentions : mergedMentions,
   };
 
+  writeConfig(cfg);
+}
+
+export function readAgentsList(): Array<{ id: string; name?: string }> {
+  // OpenClaw 2026+ stores agents as directories under ~/.openclaw/agents/
+  const agentsDir = resolve(homedir(), ".openclaw", "agents");
+  if (existsSync(agentsDir)) {
+    try {
+      const entries = readdirSync(agentsDir, { withFileTypes: true });
+      return entries
+        .filter((e) => e.isDirectory())
+        .map((e) => ({ id: e.name }));
+    } catch {
+      // fall through
+    }
+  }
+
+  // Fallback: agents.list array in config
+  const cfg = readConfig() as Record<string, any>;
+  const list = cfg?.agents?.list;
+  if (Array.isArray(list)) {
+    return list
+      .filter((a: unknown) => a && typeof a === "object")
+      .map((a: Record<string, unknown>) => {
+        const id = typeof a.id === "string" ? a.id : "";
+        const name = typeof a.name === "string" ? a.name : undefined;
+        const result: { id: string; name?: string } = { id };
+        if (name !== undefined) result.name = name;
+        return result;
+      })
+      .filter((a) => a.id.length > 0);
+  }
+
+  return [];
+}
+
+export function readBindingsForAccount(accountId: string): Array<{ agentId: string; peer?: { kind: string; id: string } }> {
+  const cfg = readConfig() as Record<string, any>;
+  const bindings = cfg?.bindings;
+  if (!Array.isArray(bindings)) return [];
+  return bindings
+    .filter((b: any) => b?.match?.channel === "rocketchat" && b?.match?.accountId === accountId)
+    .map((b: any) => {
+      const result: { agentId: string; peer?: { kind: string; id: string } } = {
+        agentId: typeof b.agentId === "string" ? b.agentId : "(unknown)",
+      };
+      if (b.match?.peer) {
+        result.peer = { kind: b.match.peer.kind, id: b.match.peer.id };
+      }
+      return result;
+    });
+}
+
+export function addAccount(opts: {
+  accountId: string;
+  serverUrl: string;
+  auth: TokenAuth;
+  mentionNames: string[];
+  transport?: { mode: "websocket"; maxConcurrent?: number };
+}): void {
+  const cfg = readConfig() as Record<string, any>;
+
+  if (!cfg.channels) cfg.channels = {};
+  if (!cfg.channels.rocketchat) cfg.channels.rocketchat = {};
+  if (!cfg.channels.rocketchat.accounts) cfg.channels.rocketchat.accounts = {};
+
+  const accounts = cfg.channels.rocketchat.accounts as Record<string, any>;
+
+  accounts[opts.accountId] = {
+    ...(accounts[opts.accountId] ?? {}),
+    enabled: true,
+    serverUrl: opts.serverUrl,
+    auth: {
+      mode: "token",
+      userId: opts.auth.userId,
+      accessToken: opts.auth.accessToken,
+    },
+    transport: opts.transport ?? { mode: "websocket" },
+    mentionNames: opts.mentionNames.map(normalizeMention).filter(Boolean),
+  };
+
+  writeConfig(cfg);
+}
+
+export function addBinding(opts: {
+  channel: string;
+  accountId: string;
+  agentId: string;
+  peer?: { kind: string; id: string };
+}): void {
+  const cfg = readConfig() as Record<string, any>;
+
+  if (!cfg.bindings) cfg.bindings = [];
+  const bindings = cfg.bindings as Array<Record<string, any>>;
+
+  const existingIndex = bindings.findIndex(
+    (b) =>
+      b.match?.channel === opts.channel &&
+      b.match?.accountId === opts.accountId &&
+      (!opts.peer || JSON.stringify(b.match?.peer) === JSON.stringify(opts.peer)),
+  );
+
+  const binding: Record<string, any> = {
+    agentId: opts.agentId,
+    match: {
+      channel: opts.channel,
+      accountId: opts.accountId,
+    },
+  };
+
+  if (opts.peer) {
+    binding.match.peer = opts.peer;
+  }
+
+  if (existingIndex >= 0) {
+    bindings[existingIndex] = binding;
+  } else {
+    bindings.push(binding);
+  }
+
+  writeConfig(cfg);
+}
+
+export function removeBindingsForAccount(accountId: string): void {
+  const cfg = readConfig() as Record<string, any>;
+  const bindings = cfg?.bindings as Array<Record<string, any>> | undefined;
+  if (!bindings) return;
+
+  cfg.bindings = bindings.filter(
+    (b) => !(b.match?.channel === "rocketchat" && b.match?.accountId === accountId),
+  );
+
+  writeConfig(cfg);
+}
+
+export function removeAccount(accountId: string): void {
+  const cfg = readConfig() as Record<string, any>;
+  const accounts = cfg?.channels?.rocketchat?.accounts as Record<string, any> | undefined;
+  if (accounts) {
+    delete accounts[accountId];
+  }
+  writeConfig(cfg);
+}
+
+export function readAllowedUsers(accountId: string): string[] {
+  const cfg = readConfig() as Record<string, any>;
+  const account = cfg?.channels?.rocketchat?.accounts?.[accountId];
+  if (!account || !Array.isArray(account.allowedUsers)) return [];
+  return account.allowedUsers.filter((u: unknown): u is string => typeof u === "string" && u.length > 0);
+}
+
+export function addAllowedUser(accountId: string, username: string): void {
+  const cfg = readConfig() as Record<string, any>;
+  const accounts = cfg?.channels?.rocketchat?.accounts as Record<string, any> | undefined;
+  const account = accounts?.[accountId];
+  if (!account || typeof account !== "object") return;
+  const list = Array.isArray(account.allowedUsers) ? account.allowedUsers : [];
+  const norm = username.trim().replace(/^@+/, "").toLowerCase();
+  if (!norm) return;
+  if (!list.some((u: unknown) => typeof u === "string" && u.trim().replace(/^@+/, "").toLowerCase() === norm)) {
+    list.push(username.trim().replace(/^@+/, ""));
+    account.allowedUsers = list;
+    writeConfig(cfg);
+  }
+}
+
+export function removeAllowedUser(accountId: string, username: string): void {
+  const cfg = readConfig() as Record<string, any>;
+  const accounts = cfg?.channels?.rocketchat?.accounts as Record<string, any> | undefined;
+  const account = accounts?.[accountId];
+  if (!account || typeof account !== "object") return;
+  const list = Array.isArray(account.allowedUsers) ? account.allowedUsers : [];
+  const norm = username.trim().replace(/^@+/, "").toLowerCase();
+  account.allowedUsers = list.filter((u: unknown) => !(typeof u === "string" && u.trim().replace(/^@+/, "").toLowerCase() === norm));
   writeConfig(cfg);
 }

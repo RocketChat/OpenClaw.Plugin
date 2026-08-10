@@ -9,11 +9,24 @@
     ]
   },
   "type": "module",
+  "bin": {
+    "openclaw-rocketchat": "dist/cli/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
     "setup": "node --import tsx src/cli/index.ts setup",
     "status": "node --import tsx src/cli/index.ts status",
+    "add-bot": "node --import tsx src/cli/index.ts add-bot",
+    "add-group": "node --import tsx src/cli/index.ts add-group",
+    "remove-group": "node --import tsx src/cli/index.ts remove-group",
+    "groups": "node --import tsx src/cli/index.ts groups",
+    "bots": "node --import tsx src/cli/index.ts bots",
+    "bind-agent": "node --import tsx src/cli/index.ts bind-agent",
+    "remove-bot": "node --import tsx src/cli/index.ts remove-bot",
+    "allow-user": "node --import tsx src/cli/index.ts allow-user",
+    "remove-user": "node --import tsx src/cli/index.ts remove-user",
+    "users": "node --import tsx src/cli/index.ts users",
     "cli": "node --import tsx src/cli/index.ts"
   },
   "repository": {
