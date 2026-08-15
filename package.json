@@ -17,16 +17,15 @@
     "start": "node dist/index.js",
     "setup": "node --import tsx src/cli/index.ts setup",
     "status": "node --import tsx src/cli/index.ts status",
-    "add-bot": "node --import tsx src/cli/index.ts add-bot",
     "add-group": "node --import tsx src/cli/index.ts add-group",
     "remove-group": "node --import tsx src/cli/index.ts remove-group",
     "groups": "node --import tsx src/cli/index.ts groups",
     "bots": "node --import tsx src/cli/index.ts bots",
     "bind-agent": "node --import tsx src/cli/index.ts bind-agent",
     "remove-bot": "node --import tsx src/cli/index.ts remove-bot",
-    "allow-user": "node --import tsx src/cli/index.ts allow-user",
-    "remove-user": "node --import tsx src/cli/index.ts remove-user",
-    "users": "node --import tsx src/cli/index.ts users",
+    "lend": "node --import tsx src/cli/index.ts lend",
+    "revoke": "node --import tsx src/cli/index.ts revoke",
+    "access": "node --import tsx src/cli/index.ts access",
     "cli": "node --import tsx src/cli/index.ts"
   },
   "repository": {
@@ -59,5 +58,6 @@
     "commander": "^15.0.0",
     "picocolors": "^1.1.1",
     "zod": "^4.4.3"
-  }
+  },
+  "packageManager": "pnpm@10.27.0+sha1.7220f3ec270b9e3b3b56cd149ad8d88bdf1b8823"
 }

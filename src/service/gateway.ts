@@ -6,6 +6,8 @@ import { getMessageAttachmentInputs, normalizeInboundAttachments } from "./attac
 import { RocketChatDdpConnection } from "../client/ddp.js";
 import type { InboundEvent, RocketChatSubscriptionRecord, RocketChatMessageRecord } from "../types.js";
 import { shouldHandleInboundEvent, matchCommand } from "./channel.js";
+import { readAccount } from "../cli/config-updater.js";
+import { AccessStore } from "../config/access-store.js";
 import { appendGroupHistory, getAndClearGroupHistory } from "./group-history.js";
 import { dispatchInboundEventWithChannelRuntime } from "./inbound.js";
 import type {
@@ -217,10 +219,11 @@ async function startDdpGateway(
         return;
       }
 
-      if (event.roomType !== "direct" && isSenderDenied(event.senderName, account.allowedUsers)) {
+      if (isSenderDenied(event.senderName, account.owner, accountId, event.roomId)) {
         const sendCmd = connection?.sendMessage.bind(connection) ?? client.postMessage.bind(client);
         const tmidOpt = event.tmid ? { tmid: event.tmid } : undefined;
-        const replyText = `**@${event.senderName}**: You don't have access to use this bot. Contact a group admin or the bot owner.`;
+        const ownerLabel = account.owner ? `@${account.owner}` : "the bot owner";
+        const replyText = `**@${event.senderName}**: You don't have access to use this bot. Contact ${ownerLabel}.`;
         try {
           await sendCmd(event.roomId, replyText, tmidOpt);
         } catch (err) {
@@ -230,7 +233,11 @@ async function startDdpGateway(
         return;
       }
 
-      const cmdResult = matchCommand(event.text);
+      const cmdResult = await matchCommand(event.text, {
+        accountId,
+        account: readAccount(accountId) ?? { accountId, serverUrl: account.serverUrl, mentionNames: account.mentionNames, auth: { mode: "token", userId: "", accessToken: "" }, ...(account.owner ? { owner: account.owner } : {}) },
+        client,
+      });
       if (cmdResult.action === "reply") {
         const sendCmd = connection?.sendMessage.bind(connection) ?? client.postMessage.bind(client);
         const tmidOpt = event.tmid ? { tmid: event.tmid } : undefined;
@@ -296,10 +303,29 @@ async function startDdpGateway(
   }
 }
 
-function isSenderDenied(senderName: string, allowedUsers: string[]): boolean {
-  if (!allowedUsers || allowedUsers.length === 0) return false;
-  const norm = senderName.toLowerCase().replace(/^@+/, "");
-  return !allowedUsers.some((u) => u.trim().replace(/^@+/, "").toLowerCase() === norm);
+function isSenderDenied(
+  senderName: string,
+  owner: string | undefined,
+  accountId: string,
+  roomId: string,
+): boolean {
+  const norm = senderName.trim().replace(/^@+/, "").toLowerCase();
+  if (!norm) return true;
+  if (owner && owner.trim().replace(/^@+/, "").toLowerCase() === norm) return false;
+  // Per-room grants created by `lend` (falls back to denial if the store is unavailable)
+  try {
+    const store = new AccessStore();
+    const granted = store.loadGrants(accountId).some(
+      (g) =>
+        g.username.trim().replace(/^@+/, "").toLowerCase() === norm &&
+        (g.roomId === "*" || g.roomId === roomId),
+    );
+    store.close();
+    if (granted) return false;
+  } catch {
+    // ignore — treat as not granted
+  }
+  return true;
 }
 
 function shouldSkipMessage(

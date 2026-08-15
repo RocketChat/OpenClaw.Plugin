@@ -1,5 +1,6 @@
 import * as p from "@clack/prompts";
 import color from "picocolors";
+import { isPrivateOrLoopbackHost } from "openclaw/plugin-sdk/ssrf-runtime";
 
 export function normalizeRocketChatUrl(input: string): string | null {
   const trimmed = input.trim();
@@ -16,6 +17,21 @@ export function normalizeRocketChatUrl(input: string): string | null {
 
   const pathname = url.pathname.replace(/\/+$/, "");
   return pathname.length > 1 ? `${url.origin}${pathname}` : url.origin;
+}
+
+/**
+ * True when the URL points at a local/loopback server (localhost, 127.x, *.local,
+ * or a private/loopback IP). In those dev environments 2FA is typically disabled,
+ * so the setup wizard can skip the verification-code prompt.
+ */
+export function isLocalRocketChatUrl(input: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    return false;
+  }
+  return isPrivateOrLoopbackHost(url.hostname.toLowerCase());
 }
 
 export function isClackCancel(value: unknown): value is symbol {
@@ -45,6 +61,29 @@ export async function promptPassword(
   return value as string;
 }
 
+/** Prompt for a 2FA / TOTP verification code. */
+export async function promptTwoFactorCode(opts: {
+  message?: string;
+  method?: string;
+  /** Allow empty input (used to let the user abort when no code was received). */
+  allowEmpty?: boolean;
+}): Promise<string> {
+  const isEmail = (opts.method ?? "totp") === "email";
+  const methodHint = opts.method && opts.method !== "totp" ? ` (${opts.method})` : "";
+  const value = await p.text({
+    message: opts.message ?? (isEmail ? "Email verification code (check your inbox)" : `Two-factor authentication code${methodHint}`),
+    placeholder: isEmail ? "from email" : "123456",
+    validate: (v) => {
+      const trimmed = (v ?? "").trim();
+      if (!trimmed) return opts.allowEmpty ? undefined : "Code is required";
+      if (!/^[0-9a-zA-Z\s-]+$/.test(trimmed)) return "Enter the verification code";
+      return undefined;
+    },
+  });
+  handleCancel(value);
+  return (value as string).replace(/\s+/g, "");
+}
+
 export async function promptConfirm(
   opts: Parameters<typeof p.confirm>[0],
 ): Promise<boolean> {
@@ -59,6 +98,22 @@ export async function promptSelect<T>(
   const value = await p.select(opts);
   handleCancel(value);
   return value as T;
+}
+
+export async function promptAutocomplete<T>(
+  opts: Parameters<typeof p.autocomplete>[0],
+): Promise<T> {
+  const value = await p.autocomplete(opts);
+  handleCancel(value);
+  return value as T;
+}
+
+export async function promptAutocompleteMultiselect<T>(
+  opts: Parameters<typeof p.autocompleteMultiselect>[0],
+): Promise<T[]> {
+  const value = await p.autocompleteMultiselect(opts);
+  handleCancel(value);
+  return value as T[];
 }
 
 export async function withSpinner<T>(message: string, task: () => Promise<T>): Promise<T> {

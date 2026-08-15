@@ -30,7 +30,7 @@ const accountSchema = z.object({
   transport: transportSchema,
   mentionNames: z.array(z.string().min(1)).default([]),
   agent: z.string().min(1).optional(),
-  allowedUsers: z.array(z.string().min(1)).default([]),
+  owner: z.string().min(1).optional(),
 }).strict();
 
 const pluginConfigSchema = z.object({

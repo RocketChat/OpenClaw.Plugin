@@ -14,11 +14,22 @@ export interface BotCredentials {
   password: string;
 }
 
+export interface OwnerCredentials {
+  serverUrl: string;
+  username: string;
+  userId: string;
+  authToken: string;
+}
+
 const CREDS_DIR = resolve(homedir(), ".openclaw", "credentials", "rocketchat");
 const ADMIN_FILE = resolve(CREDS_DIR, "admin.json");
 
 function botFile(username: string): string {
   return resolve(CREDS_DIR, `bot-${username}.json`);
+}
+
+function ownerFile(username: string): string {
+  return resolve(CREDS_DIR, `owner-${username}.json`);
 }
 
 async function writeJson(path: string, data: unknown): Promise<void> {
@@ -58,4 +69,12 @@ export async function saveBotCredentials(username: string, creds: BotCredentials
 
 export async function loadBotCredentials(username: string): Promise<BotCredentials | null> {
   return readJson<BotCredentials>(botFile(username));
+}
+
+export async function saveOwnerCredentials(creds: OwnerCredentials): Promise<void> {
+  await writeJson(ownerFile(creds.username), creds);
+}
+
+export async function loadOwnerCredentials(username: string): Promise<OwnerCredentials | null> {
+  return readJson<OwnerCredentials>(ownerFile(username));
 }

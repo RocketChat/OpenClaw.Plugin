@@ -58,7 +58,7 @@
                   ]
                 },
                 "mentionNames": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-                "allowedUsers": { "type": "array", "items": { "type": "string" } },
+                "owner": { "type": "string", "minLength": 1 },
                 "agent": { "type": "string", "minLength": 1 }
               },
               "required": ["enabled", "serverUrl"]
@@ -122,6 +122,7 @@
               ]
             },
             "mentionNames": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "owner": { "type": "string", "minLength": 1 },
             "agent": { "type": "string", "minLength": 1 }
           },
           "required": ["enabled", "serverUrl"]

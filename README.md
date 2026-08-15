@@ -12,6 +12,40 @@ The plugin uses REST polling on a configurable interval to fetch new messages fr
 - **Direct outbound delivery**: replies posted to Rocket.Chat rooms via REST
 - **Token-based auth**: configured via standard OpenClaw channel config
 
+## Bot Access Control
+Each bot account is **private by default** — only its **owner/creator** can use it, in both direct messages and group chats. The owner can lend access to specific users and revoke it anytime via the CLI:
+
+| Command | What it does |
+| --- | --- |
+| `npm run allow-user [bot]` | Grant a user access to a bot |
+| `npm run remove-user [bot]` | Revoke a user's access to a bot |
+| `npm run users [bot]` | List who has access to a bot |
+| `npm run set-owner [bot]` | Claim or transfer bot ownership (admin) |
+
+Rules:
+- The bot's `owner` is recorded automatically when the bot is created (`add-bot` / `setup`).
+- `allow-user`, `remove-user`, `add-group` and `remove-group` require the operator to prove they are the bot's owner (Rocket.Chat owner login, cached per-bot).
+- `allowedUsers` (and `owner`) are stored per account in `~/.openclaw/openclaw.json`:
+```json
+{
+  "channels": {
+    "rocketchat": {
+      "accounts": {
+        "reminder-bot": {
+          "enabled": true,
+          "serverUrl": "http://localhost:3000",
+          "owner": "your-username",
+          "allowedUsers": ["alice", "bob"],
+          "mentionNames": ["reminder-bot"]
+        }
+      }
+    }
+  }
+}
+```
+- An empty `allowedUsers` list means **only the owner** can use the bot. Unauthorized senders are ignored.
+
+
 ## What's Being Worked On
 - [x] Auth configuration window / setup wizard
 - [x] Updated polling to reduce no of requests

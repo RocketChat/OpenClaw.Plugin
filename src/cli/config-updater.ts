@@ -24,6 +24,7 @@ export type ExistingAccount = {
   serverUrl: string;
   mentionNames: string[];
   auth: TokenAuth;
+  owner?: string;
 };
 
 
@@ -48,11 +49,13 @@ export function readAccount(accountId = "main"): ExistingAccount | null {
   const mentionNames = Array.isArray(account.mentionNames)
     ? account.mentionNames.filter((n: unknown): n is string => typeof n === "string" && n.length > 0)
     : [];
+  const owner = typeof account.owner === "string" && account.owner.length > 0 ? account.owner : undefined;
   return {
     accountId,
     serverUrl,
     mentionNames,
     auth: { mode: "token", userId: auth.userId, accessToken: auth.accessToken },
+    ...(owner ? { owner } : {}),
   };
 }
 
@@ -68,6 +71,7 @@ export function updateConfig(opts: {
   transport?: { mode: "websocket" };
   mentionNames?: string[];
   auth: TokenAuth;
+  owner?: string;
 
   replaceConnection?: boolean;
 }) {
@@ -113,6 +117,7 @@ export function updateConfig(opts: {
     auth,
     transport: existing?.transport ?? opts.transport ?? { mode: "websocket" },
     mentionNames: opts.replaceConnection ? incomingMentions : mergedMentions,
+    ...(opts.owner ? { owner: opts.owner.trim().replace(/^@+/, "") } : {}),
   };
 
   writeConfig(cfg);
@@ -174,6 +179,7 @@ export function addAccount(opts: {
   auth: TokenAuth;
   mentionNames: string[];
   transport?: { mode: "websocket"; maxConcurrent?: number };
+  owner?: string;
 }): void {
   const cfg = readConfig() as Record<string, any>;
 
@@ -183,6 +189,7 @@ export function addAccount(opts: {
 
   const accounts = cfg.channels.rocketchat.accounts as Record<string, any>;
 
+  const owner = opts.owner?.trim().replace(/^@+/, "");
   accounts[opts.accountId] = {
     ...(accounts[opts.accountId] ?? {}),
     enabled: true,
@@ -194,9 +201,18 @@ export function addAccount(opts: {
     },
     transport: opts.transport ?? { mode: "websocket" },
     mentionNames: opts.mentionNames.map(normalizeMention).filter(Boolean),
+    ...(owner ? { owner } : {}),
   };
 
   writeConfig(cfg);
+}
+
+
+export function readOwner(accountId: string): string | undefined {
+  const cfg = readConfig() as Record<string, any>;
+  const account = cfg?.channels?.rocketchat?.accounts?.[accountId];
+  const owner = account?.owner;
+  return typeof owner === "string" && owner.length > 0 ? owner : undefined;
 }
 
 export function addBinding(opts: {
@@ -259,35 +275,3 @@ export function removeAccount(accountId: string): void {
   writeConfig(cfg);
 }
 
-export function readAllowedUsers(accountId: string): string[] {
-  const cfg = readConfig() as Record<string, any>;
-  const account = cfg?.channels?.rocketchat?.accounts?.[accountId];
-  if (!account || !Array.isArray(account.allowedUsers)) return [];
-  return account.allowedUsers.filter((u: unknown): u is string => typeof u === "string" && u.length > 0);
-}
-
-export function addAllowedUser(accountId: string, username: string): void {
-  const cfg = readConfig() as Record<string, any>;
-  const accounts = cfg?.channels?.rocketchat?.accounts as Record<string, any> | undefined;
-  const account = accounts?.[accountId];
-  if (!account || typeof account !== "object") return;
-  const list = Array.isArray(account.allowedUsers) ? account.allowedUsers : [];
-  const norm = username.trim().replace(/^@+/, "").toLowerCase();
-  if (!norm) return;
-  if (!list.some((u: unknown) => typeof u === "string" && u.trim().replace(/^@+/, "").toLowerCase() === norm)) {
-    list.push(username.trim().replace(/^@+/, ""));
-    account.allowedUsers = list;
-    writeConfig(cfg);
-  }
-}
-
-export function removeAllowedUser(accountId: string, username: string): void {
-  const cfg = readConfig() as Record<string, any>;
-  const accounts = cfg?.channels?.rocketchat?.accounts as Record<string, any> | undefined;
-  const account = accounts?.[accountId];
-  if (!account || typeof account !== "object") return;
-  const list = Array.isArray(account.allowedUsers) ? account.allowedUsers : [];
-  const norm = username.trim().replace(/^@+/, "").toLowerCase();
-  account.allowedUsers = list.filter((u: unknown) => !(typeof u === "string" && u.trim().replace(/^@+/, "").toLowerCase() === norm));
-  writeConfig(cfg);
-}

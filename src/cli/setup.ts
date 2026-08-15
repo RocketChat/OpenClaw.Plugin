@@ -2,11 +2,12 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir } from "node:os";
 
-import { loginAs, createBotUser, getUserByUsername, createDirectMessage, sendMessage, verifyAdmin, checkServerHealth, inviteToGroup, getGroupByName } from "./admin-api.js";
+import { loginAs, TwoFactorRequiredError, createBotUser, getUserByUsername, createDirectMessage, sendMessage, verifyAdmin, checkServerHealth, inviteToGroup, getGroupByName, getSelfInfo } from "./admin-api.js";
 import { updateConfig, readAccount, readAgentsList, addBinding } from "./config-updater.js";
 import { saveAdmin, loadAdmin, saveBotCredentials, loadBotCredentials } from "./credentials.js";
 import {
   color,
+  isLocalRocketChatUrl,
   normalizeRocketChatUrl,
   printNextSteps,
   printSummary,
@@ -14,6 +15,7 @@ import {
   promptPassword,
   promptSelect,
   promptText,
+  promptTwoFactorCode,
   prompts as p,
   showServerStatus,
   withSpinner,
@@ -25,13 +27,93 @@ const PLUGIN_PATH = resolve(__dirname, "..", "..");
 const ACCOUNT_ID = "main";
 const OC_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
 
-/** Attempt a bot login; return auth on success, or null if unauthorized. */
+/** Attempt a login (with 2FA handling); return auth on success, or null on any failure. */
 async function tryBotLogin(rcUrl: string, username: string, password: string): Promise<RCLoginResult | null> {
-  try {
-    return await loginAs(rcUrl, username, password);
-  } catch {
-    return null;
+  return loginForServer(rcUrl, username, password, username);
+}
+
+/**
+ * Log in for a given server. For local/loopback URLs 2FA is assumed disabled, so we
+ * use a plain login (no code prompt). For real domains we prompt for a 2FA code when
+ * the server requires it.
+ */
+async function loginForServer(
+  rcUrl: string,
+  user: string,
+  password: string,
+  label: string,
+): Promise<RCLoginResult | null> {
+  if (isLocalRocketChatUrl(rcUrl)) {
+    try {
+      return await loginAs(rcUrl, user, password);
+    } catch (e: unknown) {
+      p.log.error(`Login failed: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
   }
+  return loginWithTwoFactor(rcUrl, user, password, label);
+}
+
+/**
+ * Log in, handling a 2FA challenge by prompting for a verification code.
+ * Returns the auth result, or null if login failed (including exhausted 2FA attempts).
+ */
+async function loginWithTwoFactor(
+  rcUrl: string,
+  user: string,
+  password: string,
+  label: string,
+): Promise<RCLoginResult | null> {
+  let lastChallengeTransaction: string | undefined;
+
+  const attemptLogin = (code?: string) =>
+    loginAs(rcUrl, user, password, {
+      ...(code !== undefined ? { code } : {}),
+      ...(lastChallengeTransaction ? { transactionId: lastChallengeTransaction } : {}),
+    });
+
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return await attemptLogin();
+    } catch (e: unknown) {
+      if (e instanceof TwoFactorRequiredError) {
+        const method = e.challenge.methods[0] ?? "totp";
+        lastChallengeTransaction = e.challenge.transactionId || lastChallengeTransaction;
+        if (method === "email") {
+          p.log.info(`A verification code should have been emailed to ${color.cyan(label)}. If you don't receive it, the account may not have email 2FA enabled — leave empty to abort.`);
+        }
+        const code = await promptTwoFactorCode({
+          message: `Two-factor code for ${label}`,
+          method,
+          allowEmpty: method === "email",
+        });
+        if (!code) {
+          p.log.error("No code entered. Aborting two-factor login.");
+          return null;
+        }
+        try {
+          return await attemptLogin(code);
+        } catch (inner: unknown) {
+          if (inner instanceof TwoFactorRequiredError) {
+            const retryMethod = inner.challenge.methods[0] ?? "totp";
+            const hint = retryMethod === "email" ? "Invalid or expired email code. Check your inbox and try again (leave empty to abort)." : "Invalid or expired two-factor code. Please try again.";
+            p.log.error(hint);
+            lastChallengeTransaction = inner.challenge.transactionId || lastChallengeTransaction;
+            continue;
+          }
+          p.log.error(`Login failed: ${inner instanceof Error ? inner.message : String(inner)}`);
+          return null;
+        }
+      }
+
+      const message = e instanceof Error ? e.message : String(e);
+      p.log.error(`Login failed: ${message}`);
+      return null;
+    }
+  }
+
+  p.log.error("Too many two-factor attempts. Re-run setup to try again.");
+  return null;
 }
 
 /** Prompt for a Rocket.Chat URL, show its health, and require it to be reachable. */
@@ -57,7 +139,7 @@ async function promptServerUrl(defaultValue: string): Promise<string> {
   return url;
 }
 
-async function resolveAdminAuth(rcUrl: string, forceFresh = false): Promise<RCLoginResult> {
+export async function resolveAdminAuth(rcUrl: string, forceFresh = false): Promise<RCLoginResult | null> {
   const savedAdmin = await loadAdmin(rcUrl);
 
   if (savedAdmin && !forceFresh) {
@@ -82,7 +164,8 @@ async function resolveAdminAuth(rcUrl: string, forceFresh = false): Promise<RCLo
 
   return withSpinner("Logging in as admin", async () => {
     try {
-      const adminAuth = await loginAs(rcUrl, adminUser, adminPass);
+      const adminAuth = await loginForServer(rcUrl, adminUser, adminPass, adminUser);
+      if (!adminAuth) return null;
       const verdict = await verifyAdmin(rcUrl, adminAuth);
       if (!verdict.ok) {
         if (verdict.reason === "not-admin") {
@@ -92,7 +175,7 @@ async function resolveAdminAuth(rcUrl: string, forceFresh = false): Promise<RCLo
         } else {
           p.log.error("Could not verify admin status — Rocket.Chat server unreachable.");
         }
-        process.exit(1);
+        return null;
       }
       await saveAdmin({ serverUrl: rcUrl, userId: adminAuth.userId, authToken: adminAuth.authToken });
       p.log.success(`Logged in as ${color.cyan(adminUser)}`);
@@ -100,7 +183,7 @@ async function resolveAdminAuth(rcUrl: string, forceFresh = false): Promise<RCLo
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       p.log.error(`Login failed: ${message}`);
-      process.exit(1);
+      return null;
     }
   });
 }
@@ -218,8 +301,13 @@ export async function runSetup(): Promise<void> {
     adminAuth = await resolveAdminAuth(rcUrl);
   }
 
+  if (!adminAuth) {
+    p.log.error("Admin authentication failed. Setup aborted.");
+    process.exit(1);
+  }
+
   const existingUser = await withSpinner(`Checking @${botUsername} on Rocket.Chat`, () =>
-    getUserByUsername(rcUrl, adminAuth!, botUsername),
+    getUserByUsername(rcUrl, adminAuth, botUsername),
   );
 
   let botUser: { _id: string; username: string };
@@ -247,7 +335,7 @@ export async function runSetup(): Promise<void> {
               : `Wrong password — re-enter password for @${botUsername} (${2 - attempt + 1} attempt left)`,
           validate: (value) => (value ? undefined : "Password is required"),
         });
-        botAuth = await tryBotLogin(rcUrl, botUsername, botPassword);
+        botAuth = await loginForServer(rcUrl, botUsername, botPassword, botUsername);
         if (botAuth) break;
         p.log.error("Login failed: Unauthorized. Check the password and try again.");
       }
@@ -277,7 +365,7 @@ export async function runSetup(): Promise<void> {
 
     botUser = await withSpinner(`Creating bot ${color.cyan(`@${botUsername}`)}`, async () => {
       try {
-        return await createBotUser(rcUrl, adminAuth!, {
+        return await createBotUser(rcUrl, adminAuth, {
           username: botUsername,
           name: botName,
           password: botPassword,
@@ -293,7 +381,8 @@ export async function runSetup(): Promise<void> {
 
     botAuth = await withSpinner("Obtaining bot auth token", async () => {
       try {
-        const auth = await loginAs(rcUrl, botUsername, botPassword);
+        const auth = await loginForServer(rcUrl, botUsername, botPassword, botUsername);
+        if (!auth) process.exit(1);
         await saveBotCredentials(botUsername, { userId: auth.userId, password: botPassword });
         return auth;
       } catch (e: unknown) {
@@ -313,7 +402,7 @@ export async function runSetup(): Promise<void> {
 
   try {
     await withSpinner("Sending welcome DM", async () => {
-      const dmRoomId = await createDirectMessage(rcUrl, adminAuth!, botUsername);
+      const dmRoomId = await createDirectMessage(rcUrl, adminAuth, botUsername);
       await sendMessage(
         rcUrl,
         botAuth,
@@ -329,6 +418,16 @@ export async function runSetup(): Promise<void> {
 
   p.log.step("Save configuration");
 
+  let ownerUsername: string | undefined;
+  if (adminAuth) {
+    try {
+      const self = await getSelfInfo(rcUrl, adminAuth);
+      ownerUsername = self?.username;
+    } catch {
+      // owner stays undefined; can be set later by an admin in openclaw.json
+    }
+  }
+
   try {
     await withSpinner("Updating openclaw.json", async () => {
       updateConfig({
@@ -340,6 +439,7 @@ export async function runSetup(): Promise<void> {
         mentionNames: [botUsername],
         auth: { mode: "token", userId: botAuth.userId, accessToken: botAuth.authToken },
         replaceConnection: !existing || existing.serverUrl !== rcUrl,
+        ...(ownerUsername ? { owner: ownerUsername } : {}),
       });
     });
     p.log.success(`Updated ${color.cyan(OC_CONFIG_PATH)}`);
@@ -392,6 +492,7 @@ export async function runSetup(): Promise<void> {
           mentionNames: [botUsername],
           auth: { mode: "token", userId: botAuth!.userId, accessToken: botAuth!.authToken },
           replaceConnection: true,
+          ...(ownerUsername ? { owner: ownerUsername } : {}),
         });
       });
       p.log.success(`@${botUsername} is now the primary bot`);
@@ -421,7 +522,7 @@ export async function runSetup(): Promise<void> {
       }
 
       try {
-        const group = await getGroupByName(rcUrl, adminAuth!, trimmed);
+        const group = await getGroupByName(rcUrl, adminAuth, trimmed);
         if (!group) {
           p.log.warn(`Group "${trimmed}" not found. Try again or leave empty to skip.`);
           continue;
@@ -436,7 +537,7 @@ export async function runSetup(): Promise<void> {
           break;
         }
 
-        await withSpinner("Inviting bot", () => inviteToGroup(rcUrl, adminAuth!, group._id, botUsername, group.isPrivate ?? false));
+        await withSpinner("Inviting bot", () => inviteToGroup(rcUrl, adminAuth, group._id, botUsername, group.isPrivate ?? false));
         p.log.success(`Added @${botUsername} to #${group.name}`);
         break;
       } catch (e: unknown) {

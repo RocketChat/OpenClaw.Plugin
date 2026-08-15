@@ -23,6 +23,8 @@ type RCFetchOpts = {
   body?: Record<string, unknown>;
   userId?: string;
   authToken?: string;
+  /** Return the parsed JSON even when the response is not ok (e.g. a 2FA challenge). */
+  raw?: boolean;
 };
 
 async function adminFetch(baseUrl: string, path: string, opts: RCFetchOpts = {}): Promise<JsonObject> {
@@ -37,15 +39,91 @@ async function adminFetch(baseUrl: string, path: string, opts: RCFetchOpts = {})
     ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
   });
   const json = (await res.json()) as JsonObject;
-  if (!res.ok || json.success === false) {
+  if (!opts.raw && (!res.ok || json.success === false)) {
     const msg = getErrorMessage(json, res.statusText);
     throw new RocketChatClientError(`RC API ${path} failed: ${msg}`);
   }
   return json;
 }
 
-export async function loginAs(baseUrl: string, user: string, password: string): Promise<RCLoginResult> {
-  const json = await adminFetch(baseUrl, "/api/v1/login", { body: { user, password } });
+export type LoginChallenge = {
+  /** Transaction id / code returned by Rocket.Chat when 2FA is required. */
+  transactionId: string;
+  /** Available 2FA methods, e.g. ["totp"] or ["email"]. */
+  methods: string[];
+};
+
+export class TwoFactorRequiredError extends Error {
+  readonly challenge: LoginChallenge;
+
+  constructor(message: string, challenge: LoginChallenge) {
+    super(message);
+    this.name = "TwoFactorRequiredError";
+    this.challenge = challenge;
+  }
+}
+
+/** Detect a 2FA challenge in a Rocket.Chat login response. */
+function parseLoginChallenge(json: JsonObject): LoginChallenge | null {
+  const errorType = typeof json.errorType === "string" ? json.errorType : "";
+  const status = typeof json.status === "string" ? json.status : "";
+  const message = typeof json.error === "string" ? json.error : "";
+
+  // Only treat as a 2FA challenge on Rocket.Chat's explicit challenge signals.
+  // A regular failed login (bad password, rate limit, "user not found") must NOT
+  // be mistaken for 2FA, otherwise the wizard hangs waiting for a code that was
+  // never sent (e.g. a bot account without 2FA provisioned).
+  const explicitChallenge =
+    /^(totp-required|code-required|email-required|totp-invalid|code-invalid)$/i.test(errorType) ||
+    (status === "error" && /(two-factor|verification code|2fa|totp|enter the code)/i.test(message)) ||
+    /totp-required|code-required|email-required/i.test(errorType);
+
+  if (!explicitChallenge) return null;
+
+  const details = (json.details ?? {}) as Record<string, unknown>;
+  const methodsRaw = details.method ?? details.methods;
+  const methods = Array.isArray(methodsRaw)
+    ? methodsRaw.filter((m): m is string => typeof m === "string")
+    : typeof methodsRaw === "string"
+      ? [methodsRaw]
+      : ["totp"];
+
+  const transactionId =
+    typeof details.code === "string" && details.code.length > 0
+      ? details.code
+      : typeof details.token === "string" && details.token.length > 0
+        ? details.token
+        : "";
+
+  return { transactionId, methods };
+}
+
+export type LoginAsOptions = {
+  /** Optional TOTP / email 2FA code for an in-progress challenge. */
+  code?: string;
+  /** Transaction id returned by a prior 2FA challenge. */
+  transactionId?: string;
+};
+
+export async function loginAs(
+  baseUrl: string,
+  user: string,
+  password: string,
+  opts: LoginAsOptions = {},
+): Promise<RCLoginResult> {
+  const body: Record<string, unknown> = { user, password };
+  if (opts.code) {
+    body.code = opts.code;
+    // Rocket.Chat sends the 2FA transaction id back as `codeAgain`.
+    if (opts.transactionId) body.codeAgain = opts.transactionId;
+  }
+
+  const json = await adminFetch(baseUrl, "/api/v1/login", { body, raw: true });
+  const challenge = parseLoginChallenge(json);
+  if (challenge) {
+    throw new TwoFactorRequiredError("Two-factor authentication required", challenge);
+  }
+
   const data = extractRecord(json, "data");
   return { userId: extractString(data, "userId"), authToken: extractString(data, "authToken") };
 }
@@ -145,6 +223,22 @@ export async function getUserByUsername(
   }
 }
 
+export async function getSelfInfo(baseUrl: string, auth: RCLoginResult): Promise<RCUser | null> {
+  try {
+    const url = new URL("/api/v1/users.info", baseUrl);
+    url.searchParams.set("userId", auth.userId);
+    const json = await adminFetch(baseUrl, url.toString(), {
+      method: "GET",
+      userId: auth.userId,
+      authToken: auth.authToken,
+    });
+    const user = json.user as RCUser;
+    return { _id: user._id, username: user.username, name: user.name };
+  } catch {
+    return null;
+  }
+}
+
 export async function createDirectMessage(baseUrl: string, auth: RCLoginResult, username: string): Promise<string> {
   const json = await adminFetch(baseUrl, "/api/v1/im.create", {
     userId: auth.userId,
@@ -168,6 +262,51 @@ export interface RocketChatGroup {
   name: string;
  
   isPrivate?: boolean;
+}
+
+export interface RocketChatMember {
+  _id: string;
+  username: string;
+  name?: string;
+}
+
+export async function listGroupMembers(baseUrl: string, auth: RCLoginResult, roomId: string): Promise<RocketChatMember[]> {
+  for (const endpoint of ["/api/v1/groups.members", "/api/v1/channels.members"]) {
+    try {
+      const url = new URL(endpoint, baseUrl);
+      url.searchParams.set("roomId", roomId);
+      url.searchParams.set("count", "0");
+      const json = await adminFetch(baseUrl, url.toString(), {
+        method: "GET",
+        userId: auth.userId,
+        authToken: auth.authToken,
+      });
+      const members = (json.members as Array<{ _id?: string; username?: string; name?: string }> | undefined) ?? [];
+      const resolved = members
+        .map((m) => ({ _id: m._id ?? "", username: m.username ?? "", name: m.name ?? "" }))
+        .filter((m) => m._id && m.username);
+      if (resolved.length > 0 || json.members !== undefined) {
+        return resolved;
+      }
+    } catch {
+      // try next endpoint
+    }
+  }
+  return [];
+}
+
+export async function listPublicChannels(baseUrl: string, auth: RCLoginResult, count = 100): Promise<RocketChatGroup[]> {
+  const url = new URL("/api/v1/channels.list", baseUrl);
+  url.searchParams.set("count", String(count));
+  const json = await adminFetch(baseUrl, url.toString(), {
+    method: "GET",
+    userId: auth.userId,
+    authToken: auth.authToken,
+  });
+  const channels = (json.channels as Array<{ _id: string; name: string; t?: string }>) ?? [];
+  return channels
+    .filter((c) => c.name && c.name !== c._id)
+    .map((c) => ({ _id: c._id, name: c.name, isPrivate: c.t === "p" }));
 }
 
 
