@@ -19,11 +19,6 @@ export function normalizeRocketChatUrl(input: string): string | null {
   return pathname.length > 1 ? `${url.origin}${pathname}` : url.origin;
 }
 
-/**
- * True when the URL points at a local/loopback server (localhost, 127.x, *.local,
- * or a private/loopback IP). In those dev environments 2FA is typically disabled,
- * so the setup wizard can skip the verification-code prompt.
- */
 export function isLocalRocketChatUrl(input: string): boolean {
   let url: URL;
   try {
@@ -32,10 +27,6 @@ export function isLocalRocketChatUrl(input: string): boolean {
     return false;
   }
   return isPrivateOrLoopbackHost(url.hostname.toLowerCase());
-}
-
-export function isClackCancel(value: unknown): value is symbol {
-  return p.isCancel(value);
 }
 
 export function handleCancel(value: unknown): never | void {
@@ -61,11 +52,9 @@ export async function promptPassword(
   return value as string;
 }
 
-/** Prompt for a 2FA / TOTP verification code. */
 export async function promptTwoFactorCode(opts: {
   message?: string;
   method?: string;
-  /** Allow empty input (used to let the user abort when no code was received). */
   allowEmpty?: boolean;
 }): Promise<string> {
   const isEmail = (opts.method ?? "totp") === "email";
@@ -138,7 +127,6 @@ export function printNextSteps(steps: string[]): void {
   p.note(steps.map((s, i) => `${color.dim(`${i + 1}.`)} ${s}`).join("\n"), "Next steps");
 }
 
-/** Show a server online/offline status line once the user is authenticated. */
 export async function showServerStatus(url: string, check: () => Promise<boolean>): Promise<void> {
   const online = await check();
   if (online) {

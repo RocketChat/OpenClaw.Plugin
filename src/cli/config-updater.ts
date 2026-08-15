@@ -6,7 +6,7 @@ import type { AuthCredentials, JsonObject } from "../types.js";
 const OC_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
 
 
-type TokenAuth = Extract<AuthCredentials, { mode: "token" }>;
+export type TokenAuth = Extract<AuthCredentials, { mode: "token" }>;
 
 function readConfig(): JsonObject {
   if (!existsSync(OC_CONFIG_PATH)) return {};

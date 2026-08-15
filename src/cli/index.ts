@@ -3,8 +3,6 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { registerRocketChatCommands } from "./commands.js";
-
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PKG_PATH = resolve(__dirname, "..", "..", "package.json");
 
@@ -24,6 +22,12 @@ program
   .description("Rocket.Chat channel plugin CLI for OpenClaw")
   .version(readVersion());
 
-registerRocketChatCommands(program);
+program
+  .command("setup")
+  .description("Interactive setup wizard — connect Rocket.Chat to OpenClaw")
+  .action(async () => {
+    const { runSetup } = await import("./setup.js");
+    await runSetup();
+  });
 
 await program.parseAsync(process.argv);

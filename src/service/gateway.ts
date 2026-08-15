@@ -110,7 +110,7 @@ async function sendReply(
 
   await ddp?.sendTyping(roomId, false).catch(() => {});
 
-  const sendMsg = ddp?.sendMessage.bind(ddp) ?? client.postMessage.bind(client);
+  const sendMsg = client.postMessage.bind(client);
 
   if (payload.attachmentPath) {
     try {
@@ -220,7 +220,7 @@ async function startDdpGateway(
       }
 
       if (isSenderDenied(event.senderName, account.owner, accountId, event.roomId)) {
-        const sendCmd = connection?.sendMessage.bind(connection) ?? client.postMessage.bind(client);
+        const sendCmd = client.postMessage.bind(client);
         const tmidOpt = event.tmid ? { tmid: event.tmid } : undefined;
         const ownerLabel = account.owner ? `@${account.owner}` : "the bot owner";
         const replyText = `**@${event.senderName}**: You don't have access to use this bot. Contact ${ownerLabel}.`;
@@ -238,8 +238,9 @@ async function startDdpGateway(
         account: readAccount(accountId) ?? { accountId, serverUrl: account.serverUrl, mentionNames: account.mentionNames, auth: { mode: "token", userId: "", accessToken: "" }, ...(account.owner ? { owner: account.owner } : {}) },
         client,
       });
+      logger.info(`[rocketchat:${accountId}] matchCommand(${JSON.stringify(event.text)}) -> ${cmdResult.action}`);
       if (cmdResult.action === "reply") {
-        const sendCmd = connection?.sendMessage.bind(connection) ?? client.postMessage.bind(client);
+        const sendCmd = client.postMessage.bind(client);
         const tmidOpt = event.tmid ? { tmid: event.tmid } : undefined;
         try {
           await sendCmd(event.roomId, cmdResult.replyText, tmidOpt);

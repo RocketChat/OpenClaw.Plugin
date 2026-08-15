@@ -1,8 +1,8 @@
 import { resolve, dirname } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 
-import { loginAs, TwoFactorRequiredError, createBotUser, getUserByUsername, createDirectMessage, sendMessage, verifyAdmin, checkServerHealth, inviteToGroup, getGroupByName, getSelfInfo } from "./admin-api.js";
+import { loginAs, TwoFactorRequiredError, createBotUser, getUserInfo, createDirectMessage, sendMessage, verifyAdmin, checkServerHealth, inviteToGroup, getGroupByName } from "./admin-api.js";
 import { updateConfig, readAccount, readAgentsList, addBinding } from "./config-updater.js";
 import { saveAdmin, loadAdmin, saveBotCredentials, loadBotCredentials } from "./credentials.js";
 import {
@@ -27,16 +27,10 @@ const PLUGIN_PATH = resolve(__dirname, "..", "..");
 const ACCOUNT_ID = "main";
 const OC_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
 
-/** Attempt a login (with 2FA handling); return auth on success, or null on any failure. */
 async function tryBotLogin(rcUrl: string, username: string, password: string): Promise<RCLoginResult | null> {
   return loginForServer(rcUrl, username, password, username);
 }
 
-/**
- * Log in for a given server. For local/loopback URLs 2FA is assumed disabled, so we
- * use a plain login (no code prompt). For real domains we prompt for a 2FA code when
- * the server requires it.
- */
 async function loginForServer(
   rcUrl: string,
   user: string,
@@ -54,10 +48,7 @@ async function loginForServer(
   return loginWithTwoFactor(rcUrl, user, password, label);
 }
 
-/**
- * Log in, handling a 2FA challenge by prompting for a verification code.
- * Returns the auth result, or null if login failed (including exhausted 2FA attempts).
- */
+/** Log in, prompting for a 2FA code when the server requires it. */
 async function loginWithTwoFactor(
   rcUrl: string,
   user: string,
@@ -116,7 +107,6 @@ async function loginWithTwoFactor(
   return null;
 }
 
-/** Prompt for a Rocket.Chat URL, show its health, and require it to be reachable. */
 async function promptServerUrl(defaultValue: string): Promise<string> {
   const urlInput = await promptText({
     message: "Rocket.Chat URL",
@@ -204,7 +194,8 @@ async function promptBotPassword(botUsername: string): Promise<string> {
         return undefined;
       },
     });
-    return botPassword;
+    if (botPassword.length >= 6) return botPassword;
+    p.log.error("Password must be at least 6 characters.");
   }
 
   throw new Error("Valid bot password required");
@@ -214,19 +205,21 @@ export async function runSetup(): Promise<void> {
   p.intro(`${color.bgCyan(color.black(" OpenClaw "))} ${color.dim("×")} Rocket.Chat Setup`);
 
   const existing = readAccount(ACCOUNT_ID);
-  let rcUrl: string;
-  let adminAuth: RCLoginResult | null = null;
+
+  let rcUrl = existing ? existing.serverUrl : await promptServerUrl("http://localhost:3000");
+  let adminAuth: RCLoginResult | null = existing ? await loadAdmin(rcUrl) : null;
 
   if (existing) {
-    p.log.warn("Existing Rocket.Chat configuration found");
     printSummary([
       { label: "Config", value: OC_CONFIG_PATH },
       { label: "Server", value: existing.serverUrl },
       { label: "Bot", value: `@${existing.mentionNames[0] ?? existing.auth.userId}` },
     ]);
 
-    await showServerStatus(existing.serverUrl, () => checkServerHealth(existing.serverUrl));
-    if (!(await checkServerHealth(existing.serverUrl))) {
+    const online = await checkServerHealth(rcUrl);
+    await showServerStatus(rcUrl, async () => online);
+
+    if (!online) {
       const recovery = await promptSelect<string>({
         message: "Saved server is unreachable. What would you like to do?",
         options: [
@@ -239,55 +232,42 @@ export async function runSetup(): Promise<void> {
         return;
       }
       rcUrl = await promptServerUrl("https://chat.example.com");
-      adminAuth = await resolveAdminAuth(rcUrl, true);
+      adminAuth = null;
     } else {
       const action = await promptSelect<string>({
-        message: "What would you like to do?",
+        message: "Existing configuration found. What would you like to do?",
         options: [
-          { value: "reuse", label: "Keep saved admin and continue to bot setup" },
-          { value: "relogin", label: "Log in as a different admin" },
-          { value: "cancel", label: "Cancel — make no changes" },
+          { value: "continue", label: "Continue with existing data" },
+          { value: "relogin", label: "Log out and sign in as a different admin" },
+          { value: "cancel", label: "Cancel — exit setup" },
         ],
       });
 
       if (action === "cancel") {
-        p.outro(color.dim("No changes made."));
+        p.outro(color.dim("Setup aborted."));
         return;
       }
-
-      rcUrl = existing.serverUrl;
-
-      if (action === "reuse") {
-        const cachedAdmin = await loadAdmin(rcUrl);
-        const verdict = cachedAdmin ? await verifyAdmin(rcUrl, cachedAdmin) : null;
-        if (verdict?.ok) {
-          adminAuth = cachedAdmin;
-        } else {
-          if (verdict && verdict.reason === "not-admin") {
-            p.log.warn("Saved admin is missing the 'admin' role — please log in as a real admin.");
-          }
-          adminAuth = await resolveAdminAuth(rcUrl, true);
-        }
-        // Fall through to bot setup below.
-      } else {
-        adminAuth = await resolveAdminAuth(rcUrl, true);
+      if (action === "relogin") {
+        adminAuth = null;
       }
     }
-  } else {
-    p.log.step("Rocket.Chat connection");
-    rcUrl = await promptServerUrl("http://localhost:3000");
+  }
+
+  if (!adminAuth) {
     adminAuth = await resolveAdminAuth(rcUrl);
+    if (!adminAuth) {
+      p.log.error("Admin authentication failed. Setup aborted.");
+      return;
+    }
   }
 
   await showServerStatus(rcUrl, () => checkServerHealth(rcUrl));
 
   p.log.step("Bot account");
-
-  const defaultBot = existing?.mentionNames[0] ?? "rocketbot";
   const botUsername = await promptText({
     message: "Bot Rocket.Chat username",
     placeholder: "rocketbot",
-    defaultValue: defaultBot,
+    defaultValue: existing?.mentionNames[0] ?? "rocketbot",
     validate: (value) => {
       const trimmed = (value ?? "").trim();
       if (!trimmed) return "Username is required";
@@ -296,136 +276,27 @@ export async function runSetup(): Promise<void> {
     },
   });
 
-  if (!adminAuth) {
-    p.log.info("Admin login required to create or look up the bot on Rocket.Chat.");
-    adminAuth = await resolveAdminAuth(rcUrl);
-  }
-
-  if (!adminAuth) {
-    p.log.error("Admin authentication failed. Setup aborted.");
-    process.exit(1);
-  }
-
-  const existingUser = await withSpinner(`Checking @${botUsername} on Rocket.Chat`, () =>
-    getUserByUsername(rcUrl, adminAuth, botUsername),
-  );
-
-  let botUser: { _id: string; username: string };
-  let botAuth: RCLoginResult | null = null;
-
-  if (existingUser) {
-    // Bot already exists — ask for its existing password and verify it.
-    p.log.success(`Bot ${color.cyan(`@${botUsername}`)} already exists — verifying its credentials`);
-    botUser = existingUser;
-
-    const savedBot = await loadBotCredentials(botUsername);
-    let botPassword = savedBot?.password;
-
-    if (botPassword) {
-      p.log.info(`Trying saved password for ${color.cyan(`@${botUsername}`)}`);
-      botAuth = await tryBotLogin(rcUrl, botUsername, botPassword);
-    }
-
-    if (!botAuth) {
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        botPassword = await promptPassword({
-          message:
-            attempt === 1
-              ? `Password for existing bot @${botUsername}`
-              : `Wrong password — re-enter password for @${botUsername} (${2 - attempt + 1} attempt left)`,
-          validate: (value) => (value ? undefined : "Password is required"),
-        });
-        botAuth = await loginForServer(rcUrl, botUsername, botPassword, botUsername);
-        if (botAuth) break;
-        p.log.error("Login failed: Unauthorized. Check the password and try again.");
-      }
-
-      if (!botAuth) {
-        p.log.error("Too many failed attempts. Re-run setup and enter the correct bot password.");
-        process.exit(1);
-      }
-    }
-
-    await saveBotCredentials(botUsername, { userId: botAuth.userId, password: botPassword! });
-    p.log.success(`Verified bot ${color.cyan(`@${botUsername}`)}`);
-  } else {
-    // New bot — collect details and create it.
-    const botName = await promptText({
-      message: "Bot display name",
-      defaultValue: botUsername,
-    });
-
-    const botEmail = await promptText({
-      message: "Bot email",
-      defaultValue: `${botUsername.toLowerCase()}@openclaw.local`,
-      validate: (value) => ((value ?? "").includes("@") ? undefined : "Enter a valid email"),
-    });
-
-    const botPassword = await promptBotPassword(botUsername);
-
-    botUser = await withSpinner(`Creating bot ${color.cyan(`@${botUsername}`)}`, async () => {
-      try {
-        return await createBotUser(rcUrl, adminAuth, {
-          username: botUsername,
-          name: botName,
-          password: botPassword,
-          email: botEmail,
-        });
-      } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : String(e);
-        p.log.error(`Failed to create bot: ${message}`);
-        process.exit(1);
-      }
-    });
-    p.log.success(`Created bot ${color.cyan(`@${botUser.username}`)} ${color.dim(`(${botUser._id})`)}`);
-
-    botAuth = await withSpinner("Obtaining bot auth token", async () => {
-      try {
-        const auth = await loginForServer(rcUrl, botUsername, botPassword, botUsername);
-        if (!auth) process.exit(1);
-        await saveBotCredentials(botUsername, { userId: auth.userId, password: botPassword });
-        return auth;
-      } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : String(e);
-        p.log.error(`Bot login failed: ${message}`);
-        process.exit(1);
-      }
-    });
-  }
-
+  const botAuth = await resolveBotAuth(rcUrl, adminAuth, botUsername);
   if (!botAuth) {
-    p.log.error("Bot authentication was not resolved. Please re-run setup.");
-    process.exit(1);
+    p.log.error("Bot authentication failed. Setup aborted.");
+    return;
   }
-
-  p.log.step("Welcome message");
 
   try {
     await withSpinner("Sending welcome DM", async () => {
       const dmRoomId = await createDirectMessage(rcUrl, adminAuth, botUsername);
-      await sendMessage(
-        rcUrl,
-        botAuth,
-        dmRoomId,
-        "OpenClaw is connected! Restart OpenClaw (openclaw restart) then send me a message to start chatting.",
-      );
+      await sendMessage(rcUrl, botAuth, dmRoomId, "OpenClaw is connected! Send me a message to start chatting.");
     });
     p.log.success(`Welcome message sent to ${color.cyan(`@${botUsername}`)}`);
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e);
-    p.log.warn(`Welcome message skipped: ${message}`);
+    p.log.warn(`Welcome message skipped: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  p.log.step("Save configuration");
-
   let ownerUsername: string | undefined;
-  if (adminAuth) {
-    try {
-      const self = await getSelfInfo(rcUrl, adminAuth);
-      ownerUsername = self?.username;
-    } catch {
-      // owner stays undefined; can be set later by an admin in openclaw.json
-    }
+  try {
+    ownerUsername = (await getUserInfo(rcUrl, adminAuth, { userId: adminAuth.userId }))?.username;
+  } catch {
+    // owner can be set later in openclaw.json
   }
 
   try {
@@ -444,110 +315,36 @@ export async function runSetup(): Promise<void> {
     });
     p.log.success(`Updated ${color.cyan(OC_CONFIG_PATH)}`);
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e);
-    p.log.warn(`Skipped openclaw.json update: ${message}`);
+    p.log.warn(`Config update skipped: ${e instanceof Error ? e.message : String(e)}`);
   }
-
-  p.log.step("Agent binding");
 
   const agents = readAgentsList();
   if (agents.length > 0) {
     const defaultAgent = agents.find((a) => a.id === "main") ?? agents[0]!;
     try {
-      addBinding({
-        channel: "rocketchat",
-        accountId: ACCOUNT_ID,
-        agentId: defaultAgent.id,
-      });
+      addBinding({ channel: "rocketchat", accountId: ACCOUNT_ID, agentId: defaultAgent.id });
       p.log.success(`Bound @${botUsername} to agent '${defaultAgent.id}'`);
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      p.log.warn(`Could not create binding: ${message}`);
+      p.log.warn(`Could not create binding: ${e instanceof Error ? e.message : String(e)}`);
     }
   } else {
     p.log.warn("No agents found. Create one with `openclaw agents add <name>`, then restart.");
-  }
-
-  printSummary([
-    { label: "Server", value: rcUrl },
-    { label: "Bot", value: `@${botUsername} ${color.dim(`(${botUser._id})`)}` },
-    { label: "Config", value: OC_CONFIG_PATH },
-    { label: "Transport", value: "websocket" },
-  ]);
-
-  const makePrimary = await promptConfirm({
-    message: `Make @${botUsername} your primary chat bot?`,
-    initialValue: true,
-  });
-
-  if (makePrimary) {
-    try {
-      await withSpinner("Setting as primary bot", async () => {
-        updateConfig({
-          pluginPath: PLUGIN_PATH,
-          pluginId: "rocketchat",
-          accountId: ACCOUNT_ID,
-          serverUrl: rcUrl,
-          transport: { mode: "websocket" },
-          mentionNames: [botUsername],
-          auth: { mode: "token", userId: botAuth!.userId, accessToken: botAuth!.authToken },
-          replaceConnection: true,
-          ...(ownerUsername ? { owner: ownerUsername } : {}),
-        });
-      });
-      p.log.success(`@${botUsername} is now the primary bot`);
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      p.log.warn(`Could not set primary bot: ${message}`);
-    }
   }
 
   const addToGroup = await promptConfirm({
     message: `Add @${botUsername} to a Rocket.Chat group/channel?`,
     initialValue: false,
   });
-
-  if (addToGroup && adminAuth) {
-    p.log.step("Add to group");
-    while (true) {
-      const typedName = await promptText({
-        message: `Which group should @${botUsername} join? (Enter name, or leave empty to skip)`,
-        validate: () => undefined,
-      });
-
-      const trimmed = (typedName ?? "").trim();
-      if (!trimmed) {
-        p.log.info("Skipped group invite. You can add the bot later with `openclaw rocketchat add-group`.");
-        break;
-      }
-
-      try {
-        const group = await getGroupByName(rcUrl, adminAuth, trimmed);
-        if (!group) {
-          p.log.warn(`Group "${trimmed}" not found. Try again or leave empty to skip.`);
-          continue;
-        }
-
-        const confirm = await promptConfirm({
-          message: `Add @${botUsername} to #${group.name}?`,
-          initialValue: true,
-        });
-        if (!confirm) {
-          p.log.info("Skipped group invite.");
-          break;
-        }
-
-        await withSpinner("Inviting bot", () => inviteToGroup(rcUrl, adminAuth, group._id, botUsername, group.isPrivate ?? false));
-        p.log.success(`Added @${botUsername} to #${group.name}`);
-        break;
-      } catch (e: unknown) {
-        const message = e instanceof Error ? e.message : String(e);
-        p.log.warn(`Could not add bot to group: ${message}`);
-        break;
-      }
-    }
+  if (addToGroup) {
+    await promptAddToGroup(rcUrl, adminAuth, botUsername);
   }
 
+  printSummary([
+    { label: "Server", value: rcUrl },
+    { label: "Bot", value: `@${botUsername}` },
+    { label: "Config", value: OC_CONFIG_PATH },
+    { label: "Transport", value: "websocket" },
+  ]);
   printNextSteps([
     `Restart OpenClaw: ${color.cyan("openclaw restart")}`,
     `Message ${color.cyan(`@${botUsername}`)} in Rocket.Chat`,
@@ -556,10 +353,119 @@ export async function runSetup(): Promise<void> {
   p.outro(color.green("Setup complete"));
 }
 
-const isDirectRun = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
-if (isDirectRun) {
-  runSetup().catch((e: unknown) => {
-    p.log.error(e instanceof Error ? e.message : String(e));
-    process.exit(1);
+async function resolveBotAuth(
+  rcUrl: string,
+  adminAuth: RCLoginResult,
+  botUsername: string,
+): Promise<RCLoginResult | null> {
+  const existingUser = await withSpinner(`Checking @${botUsername} on Rocket.Chat`, () =>
+    getUserInfo(rcUrl, adminAuth, { username: botUsername }),
+  );
+
+  if (existingUser) {
+    p.log.success(`Bot ${color.cyan(`@${botUsername}`)} already exists — verifying its credentials`);
+    return verifyExistingBot(rcUrl, botUsername);
+  }
+
+  return createNewBot(rcUrl, adminAuth, botUsername);
+}
+
+async function verifyExistingBot(rcUrl: string, botUsername: string): Promise<RCLoginResult | null> {
+  const savedBot = await loadBotCredentials(botUsername);
+  if (savedBot?.password) {
+    const cached = await tryBotLogin(rcUrl, botUsername, savedBot.password);
+    if (cached) {
+      await saveBotCredentials(botUsername, { userId: cached.userId, password: savedBot.password });
+      p.log.success(`Verified bot ${color.cyan(`@${botUsername}`)}`);
+      return cached;
+    }
+  }
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const botPassword = await promptPassword({
+      message:
+        attempt === 1
+          ? `Password for existing bot @${botUsername}`
+          : `Wrong password — re-enter for @${botUsername} (${2 - attempt + 1} attempt left)`,
+      validate: (value) => (value ? undefined : "Password is required"),
+    });
+    const auth = await loginForServer(rcUrl, botUsername, botPassword, botUsername);
+    if (auth) {
+      await saveBotCredentials(botUsername, { userId: auth.userId, password: botPassword });
+      p.log.success(`Verified bot ${color.cyan(`@${botUsername}`)}`);
+      return auth;
+    }
+    p.log.error("Login failed: Unauthorized. Check the password and try again.");
+  }
+
+  p.log.error("Too many failed attempts. Re-run setup with the correct bot password.");
+  return null;
+}
+
+async function createNewBot(
+  rcUrl: string,
+  adminAuth: RCLoginResult,
+  botUsername: string,
+): Promise<RCLoginResult | null> {
+  const botName = await promptText({ message: "Bot display name", defaultValue: botUsername });
+  const botEmail = await promptText({
+    message: "Bot email",
+    defaultValue: `${botUsername.toLowerCase()}@openclaw.local`,
+    validate: (value) => ((value ?? "").includes("@") ? undefined : "Enter a valid email"),
   });
+  const botPassword = await promptBotPassword(botUsername);
+
+  const botUser = await withSpinner(`Creating bot ${color.cyan(`@${botUsername}`)}`, async () => {
+    try {
+      return await createBotUser(rcUrl, adminAuth, { username: botUsername, name: botName, password: botPassword, email: botEmail });
+    } catch (e: unknown) {
+      p.log.error(`Failed to create bot: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+  });
+  if (!botUser) return null;
+  p.log.success(`Created bot ${color.cyan(`@${botUser.username}`)} ${color.dim(`(${botUser._id})`)}`);
+
+  const auth = await withSpinner("Obtaining bot auth token", async () => {
+    const result = await loginForServer(rcUrl, botUsername, botPassword, botUsername);
+    if (result) await saveBotCredentials(botUsername, { userId: result.userId, password: botPassword });
+    return result;
+  });
+  if (!auth) {
+    p.log.error("Bot login failed after creation. Check the bot's credentials and re-run setup.");
+    return null;
+  }
+  return auth;
+}
+
+async function promptAddToGroup(rcUrl: string, adminAuth: RCLoginResult, botUsername: string): Promise<void> {
+  p.log.step("Add to group");
+  while (true) {
+    const typedName = await promptText({
+      message: `Which group should @${botUsername} join? (leave empty to skip)`,
+      validate: () => undefined,
+    });
+    const trimmed = (typedName ?? "").trim();
+    if (!trimmed) {
+      p.log.info("Skipped group invite.");
+      return;
+    }
+
+    const group = await getGroupByName(rcUrl, adminAuth, trimmed);
+    if (!group) {
+      p.log.warn(`Group "${trimmed}" not found. Try again or leave empty to skip.`);
+      continue;
+    }
+
+    const confirm = await promptConfirm({ message: `Add @${botUsername} to #${group.name}?`, initialValue: true });
+    if (!confirm) return;
+
+    try {
+      await withSpinner("Inviting bot", () => inviteToGroup(rcUrl, adminAuth, group._id, botUsername, group.isPrivate ?? false));
+      p.log.success(`Added @${botUsername} to #${group.name}`);
+    } catch (e: unknown) {
+      p.log.warn(`Could not add bot to group: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return;
+  }
 }

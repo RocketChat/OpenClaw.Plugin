@@ -15,18 +15,7 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "setup": "node --import tsx src/cli/index.ts setup",
-    "status": "node --import tsx src/cli/index.ts status",
-    "add-group": "node --import tsx src/cli/index.ts add-group",
-    "remove-group": "node --import tsx src/cli/index.ts remove-group",
-    "groups": "node --import tsx src/cli/index.ts groups",
-    "bots": "node --import tsx src/cli/index.ts bots",
-    "bind-agent": "node --import tsx src/cli/index.ts bind-agent",
-    "remove-bot": "node --import tsx src/cli/index.ts remove-bot",
-    "lend": "node --import tsx src/cli/index.ts lend",
-    "revoke": "node --import tsx src/cli/index.ts revoke",
-    "access": "node --import tsx src/cli/index.ts access",
-    "cli": "node --import tsx src/cli/index.ts"
+    "setup": "node --import tsx src/cli/index.ts setup"
   },
   "repository": {
     "type": "git",
