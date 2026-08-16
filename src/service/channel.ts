@@ -1,6 +1,6 @@
 import type { InboundEvent } from "../types.js";
 import type { ChannelRuleOptions } from "../types.js";
-import type { RocketChatClient } from "../client/rest.js";
+import { RocketChatClient } from "../client/rest.js";
 import type { RCLoginResult } from "../types.js";
 import {
   readAllAccounts,
@@ -10,6 +10,7 @@ import {
   addAccount,
   addBinding,
   removeBindingsForAccount,
+  removeAccount,
   type ExistingAccount,
   type TokenAuth,
 } from "../cli/config-updater.js";
@@ -18,8 +19,12 @@ import {
   loginAs,
   getGroupByName,
   checkServerHealth,
+  createDirectMessage,
+  sendMessage,
+  deleteUser,
 } from "../cli/admin-api.js";
 import { loadAdmin } from "../cli/credentials.js";
+import { startGateway, activeClients } from "./gateway.js";
 import { AccessStore } from "../config/access-store.js";
 
 const BROADCAST_MENTIONS = new Set(["here", "all", "everyone"]);
@@ -59,6 +64,7 @@ export type CommandContext = {
   accountId: string;
   account: ExistingAccount;
   client: RocketChatClient;
+  channelRuntime?: import("../types.js").ChannelRuntimeLike;
 };
 
 export type CommandResult =
@@ -91,12 +97,12 @@ export async function matchCommand(text: string, ctx: CommandContext): Promise<C
       return { action: "reply", replyText: await runStatus(ctx) };
     case "add-bot":
       return { action: "reply", replyText: await runAddBot(ctx, argStr) };
-    case "bind":
-      return { action: "reply", replyText: await runBind(ctx, argStr) };
     case "lend":
       return { action: "reply", replyText: await runLend(ctx, argStr) };
     case "revoke":
       return { action: "reply", replyText: await runRevoke(ctx, argStr) };
+    case "remove-bot":
+      return { action: "reply", replyText: await runRemoveBot(ctx, argStr) };
     default:
       return {
         action: "reply",
@@ -114,27 +120,12 @@ function buildHelpText(): string {
     "- `!bots` — list bot accounts and their agent bindings",
     "- `!groups` — list groups this bot is in",
     "- `!access` — who can use this bot and where",
-    "- `!add-bot <username>` — create a new bot user (uses saved admin creds)",
-    "- `!bind <agent>` — rebind this bot to a different agent/model",
+    "- `!add-bot <username>` — create a new bot (comes online + DMs you, no restart)",
+    "- `!remove-bot <username>` — delete a bot account (server user + config)",
     "- `!lend <group> <user>` — grant a user access to this bot in a group",
     "- `!revoke <group> <user>` — remove a user's access to this bot in a group",
     "",
-    "**`!add-bot` — create a new bot user**",
-    "Creates a real Rocket.Chat bot account using the admin credentials saved during setup,",
-    "then connects it to OpenClaw and binds it to an agent.",
-    "",
-    "Format:",
-    "  `!add-bot <username>`",
-    "",
-    "Example:",
-    "  `!add-bot nicebot`",
-    "",
-    "Defaults used automatically: display name = username, email = `<username>@openclaw.local`,",
-    "agent = `main`, and a random password is generated and shown once.",
-    "Optional flags: `--name`, `--email`, `--agent` (e.g. `!add-bot nicebot --agent support`).",
-    "",
-    "After a bot is created you must **restart OpenClaw** for the new account to come online.",
-    "The auto-generated password is shown only once — save it if you need to log in manually.",
+    "Agent/model binding is managed by OpenClaw itself (see docs: openclaw.ai/cli/agents).",
   ].join("\n");
 }
 
@@ -268,7 +259,7 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
       "  `!add-bot alice` — quick create with defaults",
       "  `!add-bot alice --name \"Alice Smith\" --email alice@example.com --agent support`",
       "",
-      "A random password is generated and shown once. Restart OpenClaw to bring the bot online.",
+      "A random password is generated and shown once. The bot comes online automatically — no restart needed.",
     ].join("\n");
   }
 
@@ -292,29 +283,76 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
     });
     addBinding({ channel: "rocketchat", accountId, agentId: agent });
 
+    const owner = ctx.account.owner?.trim().replace(/^@+/, "") || undefined;
+
+    let dmNote = "";
+    if (owner) {
+      try {
+        const dmRoom = await createDirectMessage(ctx.account.serverUrl, botAuth, owner);
+        await sendMessage(
+          ctx.account.serverUrl,
+          botAuth,
+          dmRoom,
+          `Hi! I'm @${username}, your new Rocket.Chat bot connected to OpenClaw (agent \`${agent}\`). ` +
+            `Give me a few seconds to come online, then check \`!status\` — once the server shows online, you can start talking to me. ` +
+            `Type \`!help\` anytime to explore commands.`,
+        );
+        dmNote = `I've sent a welcome DM to @${owner}.`;
+      } catch (e: unknown) {
+        dmNote = `Could not DM @${owner}: ${e instanceof Error ? e.message : String(e)}`;
+      }
+    }
+
+    void startBotAccount(ctx, {
+      accountId,
+      serverUrl: ctx.account.serverUrl,
+      auth: { mode: "token", userId: botAuth.userId, accessToken: botAuth.authToken },
+      ...(owner ? { owner } : {}),
+      agent,
+    });
+
     return [
       `**Created bot @${username}**`,
       `- agent — ${agent}`,
       `- password (auto-generated, shown once) — \`${password}\``,
-      `It is now connected. Restart OpenClaw to load the new account.`,
+      `It is now online — no restart needed.`,
+      ...(dmNote ? [dmNote] : []),
     ].join("\n");
   } catch (e: unknown) {
     return `Failed to create bot: ${e instanceof Error ? e.message : String(e)}`;
   }
 }
 
-async function runBind(ctx: CommandContext, argStr: string): Promise<string> {
-  const { positional } = parseArgs(argStr);
-  const agent = positional[0];
-  if (!agent) return "Usage: `!bind <agent>` — rebind this bot to a different agent/model";
-
-  try {
-    removeBindingsForAccount(ctx.accountId);
-    addBinding({ channel: "rocketchat", accountId: ctx.accountId, agentId: agent });
-    return `**@${ctx.account.mentionNames[0] ?? ctx.accountId}** is now bound to agent \`${agent}\`. Restart OpenClaw to apply.`;
-  } catch (e: unknown) {
-    return `Failed to rebind: ${e instanceof Error ? e.message : String(e)}`;
-  }
+/** Bring a freshly created bot account online immediately (hot-start), without a full OpenClaw restart. */
+function startBotAccount(
+  ctx: CommandContext,
+  account: {
+    accountId: string;
+    serverUrl: string;
+    auth: { mode: "token"; userId: string; accessToken: string };
+    owner?: string;
+    agent: string;
+  },
+): void {
+  const controller = new AbortController();
+  const botCtx = {
+    accountId: account.accountId,
+    account: {
+      accountId: account.accountId,
+      enabled: true,
+      serverUrl: account.serverUrl,
+      auth: account.auth,
+      transport: { mode: "websocket" as const },
+      mentionNames: [account.accountId],
+      ...(account.owner ? { owner: account.owner } : {}),
+    },
+    channelRuntime: ctx.channelRuntime,
+    abortSignal: controller.signal,
+    setStatus: (status: string) => console.log(`[RC] [rocketchat:${account.accountId}] hot-start: ${status}`),
+  };
+  startGateway(botCtx as Parameters<typeof startGateway>[0]).catch((err) =>
+    console.error(`[RC] [rocketchat:${account.accountId}] hot-start failed: ${err instanceof Error ? err.message : String(err)}`),
+  );
 }
 
 async function runLend(ctx: CommandContext, argStr: string): Promise<string> {
@@ -371,6 +409,45 @@ async function runRevoke(ctx: CommandContext, argStr: string): Promise<string> {
       : `No such grant found.`;
   } catch (e: unknown) {
     return `Failed to revoke: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+async function runRemoveBot(ctx: CommandContext, argStr: string): Promise<string> {
+  const { positional } = parseArgs(argStr);
+  const username = positional[0]?.trim().replace(/^@+/, "");
+  if (!username) return "Usage: `!remove-bot <username>` — delete a bot account (server user + OpenClaw config)";
+
+  try {
+    const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
+
+    const live = activeClients.get(username);
+    if (live) {
+      try {
+        live.wakeup();
+      } catch {
+        /* no-op */
+      }
+      activeClients.delete(username);
+    }
+
+    let serverNote = "";
+    try {
+      await deleteUser(ctx.account.serverUrl, auth, username);
+      serverNote = "Rocket.Chat user deleted.";
+    } catch (e: unknown) {
+      serverNote = `Could not delete Rocket.Chat user: ${e instanceof Error ? e.message : String(e)}`;
+    }
+
+    removeBindingsForAccount(username);
+    removeAccount(username);
+
+    return [
+      `**Removed bot @${username}**`,
+      `- ${serverNote}`,
+      `- OpenClaw config account + agent binding removed.`,
+    ].join("\n");
+  } catch (e: unknown) {
+    return `Failed to remove bot: ${e instanceof Error ? e.message : String(e)}`;
   }
 }
 

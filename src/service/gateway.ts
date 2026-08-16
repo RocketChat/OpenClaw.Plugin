@@ -237,6 +237,7 @@ async function startDdpGateway(
         accountId,
         account: readAccount(accountId) ?? { accountId, serverUrl: account.serverUrl, mentionNames: account.mentionNames, auth: { mode: "token", userId: "", accessToken: "" }, ...(account.owner ? { owner: account.owner } : {}) },
         client,
+        ...(ctx.channelRuntime ? { channelRuntime: ctx.channelRuntime } : {}),
       });
       logger.info(`[rocketchat:${accountId}] matchCommand(${JSON.stringify(event.text)}) -> ${cmdResult.action}`);
       if (cmdResult.action === "reply") {

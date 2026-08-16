@@ -147,6 +147,14 @@ export async function createBotUser(
   return { _id: extractString(userRecord, "_id"), username: extractString(userRecord, "username"), name: extractString(userRecord, "name") };
 }
 
+export async function deleteUser(baseUrl: string, auth: RCLoginResult, username: string): Promise<void> {
+  await adminFetch(baseUrl, "/api/v1/users.delete", {
+    userId: auth.userId,
+    authToken: auth.authToken,
+    body: { username },
+  });
+}
+
 export async function getUserInfo(
   baseUrl: string,
   auth: RCLoginResult,
