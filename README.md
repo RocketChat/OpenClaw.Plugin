@@ -1,3 +1,5 @@
+# Rocket.Chat Plugin for OpenClaw
+A channel plugin for [OpenClaw](https://opencode.ai) that enables direct integration with [Rocket.Chat](https://rocket.chat), no external bridge server needed. It handles inbound message polling, outbound delivery, session management, and agent orchestration through a single plugin.
                                      1. Code review, Merge current branch ko
                                      2. leftovers : Concurrency, Rate limits, security, UX, Docs, tests, publish to npm
                                      3. Testing with fresh Openclaw setup + Skills and everything like testing it properly
@@ -7,3 +9,90 @@
                                      7. Adding more commands : https://github.com/Kxiandaoyan/openclaw-rocketchat/blob/master/docs/COMMANDS.en.md
                                      8. Bindings during add bot  One bot bound to one Agent, use multiple bots for multiple Agents. This is the officially recommended approach — most stable and simplest.
 
+## Architecture
+The plugin uses REST polling on a configurable interval to fetch new messages from Rocket.Chat subscriptions. On each poll cycle, it checks for updated subscriptions via `subscriptions.get`, syncs new messages per room via `chat.syncMessages`, deduplicates using an in-memory Set combined with an on-disk checkpoint file, filters out system events and the bot's own messages, and dispatches user messages to OpenClaw's agent runtime. The outbound path delivers agent replies directly to Rocket.Chat rooms via `chat.postMessage`. A checkpoint file at `~/.openclaw/rocketchat/<accountId>.json` persists the last 250 message IDs and timestamp across restarts.
+
+## Features
+- **Polling-based inbound**: REST polling on configurable interval (default 3s)
+- **Deduplication**: on-disk checkpoint + in-memory Set prevents re-processing
+- **Message filtering**: skips bot's own messages, system events, empty messages, duplicates
+- **Emoji reactions**: random processing emoji on receive, checkmark on delivery
+- **Direct outbound delivery**: replies posted to Rocket.Chat rooms via REST
+- **Token-based auth**: configured via standard OpenClaw channel config
+
+## What's Being Worked On
+- [x] Auth configuration window / setup wizard
+- [x] Updated polling to reduce no of requests
+- [ ] Concurrency control / per-room message queue
+- [ ] Rate limiting and security hardening
+- [ ] Media handling (files and audio)
+- [x] Group chat @mention support, routing and thread replies
+- [ ] Bot delegation / multi-bot task routing
+- [ ] Shortcuts and slash commands
+- [ ] WebSocket real-time transport (optional upgrade from polling)
+
+## Configuration
+Added as `Example openclaw.example.json` in codebase
+```json
+{
+  "channels": {
+    "rocketchat": {
+      "accounts": {
+        "main": {
+          "enabled": true,
+          "serverUrl": "http://localhost:3000",
+          "auth": {
+            "mode": "token",
+            "userId": "<your-user-id>",
+            "accessToken": "<your-personal-access-token>"
+          },
+          "transport": { "mode": "polling" },
+          "mentionNames": ["rocketbot"]
+        }
+      }
+    }
+  }
+}
+```
+You also need at least one AI provider and a default agent model configured:
+```json
+{
+  "models": {
+    "providers": {
+      "ollama": {
+        "baseUrl": "http://127.0.0.1:11434",
+        "apiKey": "ollama",
+        "api": "ollama",
+        "models": [
+          {
+            "id": "llama3.2:3b",
+            "name": "Llama 3.2 3B",
+            "contextWindow": 16000,
+            "maxTokens": 4096
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "ollama/llama3.2:3b"
+    }
+  }
+}
+```
+
+## Plugin Installation
+Add the plugin path to your `openclaw.json`:
+```json
+{
+  "plugins": {
+    "load": {
+      "paths": ["/path/to/your/plugin"]
+    }
+  }
+}
+```
+
+## Learn more
+Added a detailed blog :  https://readyy.hashnode.dev/building-rocket-chat-channel-plugin-for-openclaw
