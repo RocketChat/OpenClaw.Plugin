@@ -11,7 +11,11 @@ export function resolveOpenClawDir(): string {
 }
 
 export function resolveUrl(url: string, base?: string): string {
-  try { return new URL(url).toString(); } catch { /* relative */ }
+  try {
+    return new URL(url).toString();
+  } catch {
+    /* relative */
+  }
   if (!base) return url;
   try {
     return new URL(url, base.endsWith("/") ? base : base + "/").toString();

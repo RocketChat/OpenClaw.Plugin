@@ -1,7 +1,13 @@
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { randomUUID } from "node:crypto";
-import { extractQuotedMessageId, resolveOpenClawDir, resolveUrl, getExt, getErrorMessage } from "../utils.js";
+import {
+  extractQuotedMessageId,
+  resolveOpenClawDir,
+  resolveUrl,
+  getExt,
+  getErrorMessage,
+} from "../utils.js";
 import { isPrivateOrLoopbackHost } from "openclaw/plugin-sdk/ssrf-runtime";
 
 const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
@@ -66,7 +72,7 @@ export class RocketChatClient {
     if (!response.ok) {
       throw new RocketChatClientError(`login failed: ${response.statusText}`);
     }
-    const payload = await response.json() as JsonObject;
+    const payload = (await response.json()) as JsonObject;
     const data = asObject(payload.data);
     this.resolvedUserId = getString(data, "userId");
     this.resolvedAuthToken = getString(data, "authToken");
@@ -75,7 +81,9 @@ export class RocketChatClient {
   async getIdentity(): Promise<RocketChatIdentity> {
     if (this.identity) return this.identity;
     await this.ensureInitialized();
-    const payload = await this.requestJson(new URL("/api/v1/me", this.serverUrl), { method: "GET" });
+    const payload = await this.requestJson(new URL("/api/v1/me", this.serverUrl), {
+      method: "GET",
+    });
     const user = asObject(payload.user ?? payload.me ?? payload);
     this.identity = {
       userId: this.resolvedUserId!,
@@ -121,7 +129,7 @@ export class RocketChatClient {
     const link = (Array.isArray(message.attachments) ? message.attachments : [])
       .map((att) => (att as { message_link?: string }).message_link)
       .find((l): l is string => typeof l === "string" && l.length > 0);
-    const quotedId = link ? extractQuotedMessageId(link) ?? null : null;
+    const quotedId = link ? (extractQuotedMessageId(link) ?? null) : null;
     return { text, quotedId };
   }
 
@@ -132,7 +140,9 @@ export class RocketChatClient {
     await this.ensureInitialized();
     const requestUrl = resolveUrl(url, this.serverUrl);
     if (!isSafeExternalUrl(requestUrl, this.serverUrl)) {
-      throw new RocketChatClientError(`attachment download blocked: ${requestUrl} resolves to a private/internal address`);
+      throw new RocketChatClientError(
+        `attachment download blocked: ${requestUrl} resolves to a private/internal address`,
+      );
     }
     const response = await this.fetchFn(requestUrl, {
       method: "GET",
@@ -147,7 +157,10 @@ export class RocketChatClient {
     }
     const contentTypeHeader = response.headers.get("Content-Type");
     const rawContentType = (contentTypeHeader ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
-    if (!rawContentType || !ALLOWED_DOWNLOAD_MIME_PREFIXES.some((p) => rawContentType.startsWith(p))) {
+    if (
+      !rawContentType ||
+      !ALLOWED_DOWNLOAD_MIME_PREFIXES.some((p) => rawContentType.startsWith(p))
+    ) {
       throw new RocketChatClientError(
         `attachment download refused: unsupported content type "${contentTypeHeader ?? ""}"`,
       );
@@ -165,7 +178,10 @@ export class RocketChatClient {
     await mkdir(inboundDir, { recursive: true });
     const ext = getExt(options?.fileName ?? url ?? "attachment");
     const safeName = (options?.fileName ?? "attachment").replace(/[^a-zA-Z0-9._-]/g, "_");
-    const filePath = join(inboundDir, `${safeName}---${randomUUID().slice(0, 12)}${ext ? `.${ext}` : ""}`);
+    const filePath = join(
+      inboundDir,
+      `${safeName}---${randomUUID().slice(0, 12)}${ext ? `.${ext}` : ""}`,
+    );
     const bytes = Buffer.from(await response.arrayBuffer());
     if (bytes.length > MAX_DOWNLOAD_BYTES) {
       throw new RocketChatClientError(
@@ -182,13 +198,22 @@ export class RocketChatClient {
     text?: string,
     options?: { tmid?: string },
   ): Promise<string> {
-    await this.ensureInitialized();
-    const fileName = basename(filePath);
     const fileBytes = await readFile(filePath);
+    return this.uploadAttachmentFromBuffer(roomId, fileBytes, basename(filePath), text, options);
+  }
+
+  async uploadAttachmentFromBuffer(
+    roomId: string,
+    buffer: Buffer | Uint8Array,
+    fileName: string,
+    text?: string,
+    options?: { tmid?: string },
+  ): Promise<string> {
+    await this.ensureInitialized();
     const formData = new FormData();
     if (text?.trim()) formData.append("msg", text.trim());
     if (options?.tmid) formData.append("tmid", options.tmid);
-    formData.append("file", new Blob([fileBytes]), fileName);
+    formData.append("file", new Blob([buffer as never]), fileName);
     const uploadResponse = await this.fetchFn(
       new URL(`/api/v1/rooms.media/${encodeURIComponent(roomId)}`, this.serverUrl).toString(),
       {
@@ -244,7 +269,7 @@ export class RocketChatClient {
         Accept: "application/json",
         "X-User-Id": this.resolvedUserId!,
         "X-Auth-Token": this.resolvedAuthToken!,
-        ...(init.headers as Record<string, string> ?? {}),
+        ...((init.headers as Record<string, string>) ?? {}),
       },
     });
     return this.parseJsonResponse(response);
@@ -339,4 +364,3 @@ function getRetryAfterMs(response: Response, payload: JsonObject): number {
 
   return 30_000;
 }
-

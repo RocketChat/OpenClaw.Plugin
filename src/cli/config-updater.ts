@@ -1,16 +1,17 @@
 import { existsSync, readFileSync, writeFileSync, renameSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
+import { execFileSync } from "node:child_process";
+import JSON5 from "json5";
 import type { AuthCredentials, JsonObject } from "../types.js";
 
 const OC_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
-
 
 export type TokenAuth = Extract<AuthCredentials, { mode: "token" }>;
 
 function readConfig(): JsonObject {
   if (!existsSync(OC_CONFIG_PATH)) return {};
-  return JSON.parse(readFileSync(OC_CONFIG_PATH, "utf-8"));
+  return JSON5.parse(readFileSync(OC_CONFIG_PATH, "utf-8"));
 }
 
 function writeConfig(cfg: JsonObject): void {
@@ -26,7 +27,6 @@ export type ExistingAccount = {
   auth: TokenAuth;
   owner?: string;
 };
-
 
 export function readAllAccounts(): ExistingAccount[] {
   const cfg = readConfig() as Record<string, any>;
@@ -47,9 +47,12 @@ export function readAccount(accountId = "main"): ExistingAccount | null {
   if (typeof auth.userId !== "string" || typeof auth.accessToken !== "string") return null;
   if (!auth.userId || !auth.accessToken) return null;
   const mentionNames = Array.isArray(account.mentionNames)
-    ? account.mentionNames.filter((n: unknown): n is string => typeof n === "string" && n.length > 0)
+    ? account.mentionNames.filter(
+        (n: unknown): n is string => typeof n === "string" && n.length > 0,
+      )
     : [];
-  const owner = typeof account.owner === "string" && account.owner.length > 0 ? account.owner : undefined;
+  const owner =
+    typeof account.owner === "string" && account.owner.length > 0 ? account.owner : undefined;
   return {
     accountId,
     serverUrl,
@@ -96,7 +99,9 @@ export function updateConfig(opts: {
   const existing = accounts[opts.accountId] as Record<string, any> | undefined;
 
   const existingMentions = Array.isArray(existing?.mentionNames)
-    ? existing.mentionNames.map((n: unknown) => (typeof n === "string" ? normalizeMention(n) : "")).filter(Boolean)
+    ? existing.mentionNames
+        .map((n: unknown) => (typeof n === "string" ? normalizeMention(n) : ""))
+        .filter(Boolean)
     : [];
   const incomingMentions = (opts.mentionNames ?? []).map(normalizeMention).filter(Boolean);
   const mergedMentions = [...existingMentions];
@@ -104,11 +109,16 @@ export function updateConfig(opts: {
     if (!mergedMentions.includes(m)) mergedMentions.push(m);
   }
 
-
-  const serverUrl = opts.replaceConnection ? opts.serverUrl : (existing?.serverUrl ?? opts.serverUrl);
+  const serverUrl = opts.replaceConnection
+    ? opts.serverUrl
+    : (existing?.serverUrl ?? opts.serverUrl);
   const auth = opts.replaceConnection
     ? { mode: "token" as const, userId: opts.auth.userId, accessToken: opts.auth.accessToken }
-    : (existing?.auth ?? { mode: "token" as const, userId: opts.auth.userId, accessToken: opts.auth.accessToken });
+    : (existing?.auth ?? {
+        mode: "token" as const,
+        userId: opts.auth.userId,
+        accessToken: opts.auth.accessToken,
+      });
 
   accounts[opts.accountId] = {
     ...(existing ?? {}),
@@ -129,9 +139,7 @@ export function readAgentsList(): Array<{ id: string; name?: string }> {
   if (existsSync(agentsDir)) {
     try {
       const entries = readdirSync(agentsDir, { withFileTypes: true });
-      return entries
-        .filter((e) => e.isDirectory())
-        .map((e) => ({ id: e.name }));
+      return entries.filter((e) => e.isDirectory()).map((e) => ({ id: e.name }));
     } catch {
       // fall through
     }
@@ -156,7 +164,9 @@ export function readAgentsList(): Array<{ id: string; name?: string }> {
   return [];
 }
 
-export function readBindingsForAccount(accountId: string): Array<{ agentId: string; peer?: { kind: string; id: string } }> {
+export function readBindingsForAccount(
+  accountId: string,
+): Array<{ agentId: string; peer?: { kind: string; id: string } }> {
   const cfg = readConfig() as Record<string, any>;
   const bindings = cfg?.bindings;
   if (!Array.isArray(bindings)) return [];
@@ -207,12 +217,35 @@ export function addAccount(opts: {
   writeConfig(cfg);
 }
 
-
 export function readOwner(accountId: string): string | undefined {
   const cfg = readConfig() as Record<string, any>;
   const account = cfg?.channels?.rocketchat?.accounts?.[accountId];
   const owner = account?.owner;
   return typeof owner === "string" && owner.length > 0 ? owner : undefined;
+}
+
+export function ensureAgentForBot(accountId: string): {
+  agentId: string;
+  created: boolean;
+  fallback: boolean;
+} {
+  const dedicatedId = `rc-${accountId}`;
+  const existing = readAgentsList();
+  if (existing.some((a) => a.id === dedicatedId)) {
+    return { agentId: dedicatedId, created: false, fallback: false };
+  }
+
+  try {
+    const workspace = resolve(homedir(), ".openclaw", "agents", dedicatedId);
+    execFileSync(
+      "openclaw",
+      ["agents", "add", dedicatedId, "--non-interactive", "--workspace", workspace],
+      { stdio: "ignore" },
+    );
+    return { agentId: dedicatedId, created: true, fallback: false };
+  } catch {
+    return { agentId: "main", created: false, fallback: true };
+  }
 }
 
 export function addBinding(opts: {
@@ -274,4 +307,3 @@ export function removeAccount(accountId: string): void {
   }
   writeConfig(cfg);
 }
-

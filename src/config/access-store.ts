@@ -61,24 +61,36 @@ export class AccessStore {
         username TEXT
       );
     `);
-    this.db.prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)").run(SCHEMA_VERSION);
+    this.db
+      .prepare("INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)")
+      .run(SCHEMA_VERSION);
   }
 
   loadGrants(accountId: string): AccessGrant[] {
     const rows = this.db
-      .prepare("SELECT account_id, room_id, room_name, username, granted_by, granted_at FROM grants WHERE account_id = ?")
+      .prepare(
+        "SELECT account_id, room_id, room_name, username, granted_by, granted_at FROM grants WHERE account_id = ?",
+      )
       .all(accountId) as Array<Record<string, unknown>>;
     return rows.map(toGrant);
   }
 
   loadAllGrants(): AccessGrant[] {
     const rows = this.db
-      .prepare("SELECT account_id, room_id, room_name, username, granted_by, granted_at FROM grants")
+      .prepare(
+        "SELECT account_id, room_id, room_name, username, granted_by, granted_at FROM grants",
+      )
       .all() as Array<Record<string, unknown>>;
     return rows.map(toGrant);
   }
 
-  addGrant(grant: { accountId: string; roomId: string; roomName?: string; username: string; grantedBy?: string }): boolean {
+  addGrant(grant: {
+    accountId: string;
+    roomId: string;
+    roomName?: string;
+    username: string;
+    grantedBy?: string;
+  }): boolean {
     const existing = this.db
       .prepare("SELECT 1 FROM grants WHERE account_id = ? AND room_id = ? AND username = ?")
       .get(grant.accountId, grant.roomId, grant.username);
@@ -89,7 +101,14 @@ export class AccessStore {
       .prepare(
         "INSERT INTO grants (account_id, room_id, room_name, username, granted_by, granted_at) VALUES (?, ?, ?, ?, ?, ?)",
       )
-      .run(grant.accountId, grant.roomId, grant.roomName ?? null, grant.username, grant.grantedBy ?? null, now);
+      .run(
+        grant.accountId,
+        grant.roomId,
+        grant.roomName ?? null,
+        grant.username,
+        grant.grantedBy ?? null,
+        now,
+      );
     this.appendAudit({
       at: now,
       actor: grant.grantedBy ?? "",
@@ -101,7 +120,12 @@ export class AccessStore {
     return true;
   }
 
-  removeGrant(params: { accountId: string; roomId: string; username: string; revokedBy?: string }): boolean {
+  removeGrant(params: {
+    accountId: string;
+    roomId: string;
+    username: string;
+    revokedBy?: string;
+  }): boolean {
     const removed = this.db
       .prepare("DELETE FROM grants WHERE account_id = ? AND room_id = ? AND username = ?")
       .run(params.accountId, params.roomId, params.username).changes;
@@ -121,10 +145,14 @@ export class AccessStore {
   listAudit(accountId?: string, limit = 50): AuditEntry[] {
     const rows = accountId
       ? (this.db
-          .prepare("SELECT at, actor, action, account_id, room_id, username FROM audit WHERE account_id = ? ORDER BY id DESC LIMIT ?")
+          .prepare(
+            "SELECT at, actor, action, account_id, room_id, username FROM audit WHERE account_id = ? ORDER BY id DESC LIMIT ?",
+          )
           .all(accountId, limit) as Array<Record<string, unknown>>)
       : (this.db
-          .prepare("SELECT at, actor, action, account_id, room_id, username FROM audit ORDER BY id DESC LIMIT ?")
+          .prepare(
+            "SELECT at, actor, action, account_id, room_id, username FROM audit ORDER BY id DESC LIMIT ?",
+          )
           .all(limit) as Array<Record<string, unknown>>);
     return rows.map(toAuditEntry);
   }
@@ -144,8 +172,17 @@ export class AccessStore {
 
   private appendAudit(entry: Omit<AuditEntry, "id">): void {
     this.db
-      .prepare("INSERT INTO audit (at, actor, action, account_id, room_id, username) VALUES (?, ?, ?, ?, ?, ?)")
-      .run(entry.at, entry.actor, entry.action, entry.accountId, entry.roomId ?? null, entry.username ?? null);
+      .prepare(
+        "INSERT INTO audit (at, actor, action, account_id, room_id, username) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(
+        entry.at,
+        entry.actor,
+        entry.action,
+        entry.accountId,
+        entry.roomId ?? null,
+        entry.username ?? null,
+      );
   }
 }
 

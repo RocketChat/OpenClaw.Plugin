@@ -17,6 +17,9 @@ importers:
       commander:
         specifier: ^15.0.0
         version: 15.0.0
+      json5:
+        specifier: ^2.2.3
+        version: 2.2.3
       picocolors:
         specifier: ^1.1.1
         version: 1.1.1
@@ -33,6 +36,9 @@ importers:
       openclaw:
         specifier: ^2026.7.1-2
         version: 2026.7.1-2
+      prettier:
+        specifier: ^3.9.6
+        version: 3.9.6
       tsx:
         specifier: ^4.22.4
         version: 4.23.1
@@ -1149,6 +1155,11 @@ packages:
   pngjs@5.0.0:
     resolution: {integrity: sha512-40QW5YalBNfQo5yRYmiw7Yz6TKKVr3h6970B2YE+3fQpsWcrbj1PzJgxeJ19DRQjhMbKPIuMY8rFaXc8moolVw==}
     engines: {node: '>=10.13.0'}
+
+  prettier@3.9.6:
+    resolution: {integrity: sha512-OpN0zzVdiaiAhxpuuj5efpIS4sY9j7bY6uR5mnj5yPzGkdkjNKSJeUThPb60Jw29QuAZgA4o+/iB49kFiaBX6g==}
+    engines: {node: '>=14'}
+    hasBin: true
 
   process-nextick-args@2.0.1:
     resolution: {integrity: sha512-3ouUOpQhtgrbOa17J7+uxOTpITYWaGP7/AhoR3+A+/1e9skrzelGi/dXzEYyvbxubEF6Wn2ypscTKiKJFFn1ag==}
@@ -2641,6 +2652,8 @@ snapshots:
   playwright-core@1.61.1: {}
 
   pngjs@5.0.0: {}
+
+  prettier@3.9.6: {}
 
   process-nextick-args@2.0.1: {}
 

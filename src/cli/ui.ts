@@ -36,17 +36,13 @@ export function handleCancel(value: unknown): never | void {
   }
 }
 
-export async function promptText(
-  opts: Parameters<typeof p.text>[0],
-): Promise<string> {
+export async function promptText(opts: Parameters<typeof p.text>[0]): Promise<string> {
   const value = await p.text(opts);
   handleCancel(value);
   return value as string;
 }
 
-export async function promptPassword(
-  opts: Parameters<typeof p.password>[0],
-): Promise<string> {
+export async function promptPassword(opts: Parameters<typeof p.password>[0]): Promise<string> {
   const value = await p.password(opts);
   handleCancel(value);
   return value as string;
@@ -60,7 +56,11 @@ export async function promptTwoFactorCode(opts: {
   const isEmail = (opts.method ?? "totp") === "email";
   const methodHint = opts.method && opts.method !== "totp" ? ` (${opts.method})` : "";
   const value = await p.text({
-    message: opts.message ?? (isEmail ? "Email verification code (check your inbox)" : `Two-factor authentication code${methodHint}`),
+    message:
+      opts.message ??
+      (isEmail
+        ? "Email verification code (check your inbox)"
+        : `Two-factor authentication code${methodHint}`),
     placeholder: isEmail ? "from email" : "123456",
     validate: (v) => {
       const trimmed = (v ?? "").trim();
@@ -73,17 +73,13 @@ export async function promptTwoFactorCode(opts: {
   return (value as string).replace(/\s+/g, "");
 }
 
-export async function promptConfirm(
-  opts: Parameters<typeof p.confirm>[0],
-): Promise<boolean> {
+export async function promptConfirm(opts: Parameters<typeof p.confirm>[0]): Promise<boolean> {
   const value = await p.confirm(opts);
   handleCancel(value);
   return value as boolean;
 }
 
-export async function promptSelect<T>(
-  opts: Parameters<typeof p.select>[0],
-): Promise<T> {
+export async function promptSelect<T>(opts: Parameters<typeof p.select>[0]): Promise<T> {
   const value = await p.select(opts);
   handleCancel(value);
   return value as T;

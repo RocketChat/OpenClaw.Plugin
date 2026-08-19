@@ -28,11 +28,10 @@ export function getMessageAttachmentInputs(message: {
   const paired = new Set<number>();
 
   for (const fileRec of fileRecords) {
-    const matchIdx = attachmentRecords.findIndex((att, i) =>
-      !paired.has(i) && (
-        (fileRec._id && att._id && fileRec._id === att._id) ||
-        (!hasId(att) && hasUrl(att))
-      ),
+    const matchIdx = attachmentRecords.findIndex(
+      (att, i) =>
+        !paired.has(i) &&
+        ((fileRec._id && att._id && fileRec._id === att._id) || (!hasId(att) && hasUrl(att))),
     );
     if (matchIdx !== -1) {
       paired.add(matchIdx);
@@ -79,7 +78,9 @@ function toAttachment(input: unknown, options?: { serverUrl?: string }): Inbound
 }
 
 function asRecord(input: unknown): AttachmentRecord | null {
-  return input && typeof input === "object" && !Array.isArray(input) ? input as AttachmentRecord : null;
+  return input && typeof input === "object" && !Array.isArray(input)
+    ? (input as AttachmentRecord)
+    : null;
 }
 
 function toRecords(inputs: unknown[]): AttachmentRecord[] {
@@ -91,8 +92,17 @@ function getMime(record: AttachmentRecord | null): string | undefined {
   return typeof v === "string" && v.trim().length > 0 ? v.trim().toLowerCase() : undefined;
 }
 
-function getUrl(record: AttachmentRecord | null, serverUrl: string | undefined): string | undefined {
-  const candidates = [record?.url, record?.title_link, record?.image_url, record?.video_url, record?.audio_url];
+function getUrl(
+  record: AttachmentRecord | null,
+  serverUrl: string | undefined,
+): string | undefined {
+  const candidates = [
+    record?.url,
+    record?.title_link,
+    record?.image_url,
+    record?.video_url,
+    record?.audio_url,
+  ];
   const raw = candidates.find((v): v is string => typeof v === "string" && v.length > 0);
   return raw ? resolveUrl(raw, serverUrl) : undefined;
 }
@@ -106,13 +116,16 @@ function getFileName(record: AttachmentRecord | null, url: string | undefined): 
   try {
     const seg = new URL(url).pathname.split("/").filter(Boolean).at(-1);
     return seg ? decodeURIComponent(seg) : undefined;
-  } catch { return undefined; }
+  } catch {
+    return undefined;
+  }
 }
 
-function classify(mimeType: string | undefined, fileName: string | undefined): InboundAttachmentKind {
+function classify(
+  mimeType: string | undefined,
+  fileName: string | undefined,
+): InboundAttachmentKind {
   const mime = mimeType ?? (fileName ? mimeTypeFromFilePath(fileName) : undefined);
   const kind = mime ? mediaKindFromMime(mime) : undefined;
   return kind ?? "unknown";
 }
-
-

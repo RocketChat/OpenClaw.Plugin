@@ -9,6 +9,7 @@ import {
   readAccount,
   addAccount,
   addBinding,
+  ensureAgentForBot,
   removeBindingsForAccount,
   removeAccount,
   type ExistingAccount,
@@ -22,6 +23,8 @@ import {
   createDirectMessage,
   sendMessage,
   deleteUser,
+  inviteToGroup,
+  listGroupMembers,
 } from "../cli/admin-api.js";
 import { loadAdmin } from "../cli/credentials.js";
 import { startGateway, activeClients } from "./gateway.js";
@@ -51,7 +54,6 @@ export function shouldHandleInboundEvent(
     if (aliases.has(name)) return true;
   }
 
-
   const normalizedText = event.text.toLowerCase();
   for (const alias of aliases) {
     if (normalizedText.includes(`@${alias}`)) return true;
@@ -67,9 +69,7 @@ export type CommandContext = {
   channelRuntime?: import("../types.js").ChannelRuntimeLike;
 };
 
-export type CommandResult =
-  | { action: "reply"; replyText: string }
-  | { action: "passthrough" };
+export type CommandResult = { action: "reply"; replyText: string } | { action: "passthrough" };
 
 const COMMAND_RE = /^\s*!(\S+)(?:\s+([\s\S]*))?$/i;
 
@@ -97,12 +97,16 @@ export async function matchCommand(text: string, ctx: CommandContext): Promise<C
       return { action: "reply", replyText: await runStatus(ctx) };
     case "add-bot":
       return { action: "reply", replyText: await runAddBot(ctx, argStr) };
+    case "bindings":
+      return { action: "reply", replyText: buildBindingsHelpText() };
     case "lend":
       return { action: "reply", replyText: await runLend(ctx, argStr) };
     case "revoke":
       return { action: "reply", replyText: await runRevoke(ctx, argStr) };
     case "remove-bot":
       return { action: "reply", replyText: await runRemoveBot(ctx, argStr) };
+    case "add-group":
+      return { action: "reply", replyText: await runAddGroup(ctx, argStr) };
     default:
       return {
         action: "reply",
@@ -115,17 +119,46 @@ function buildHelpText(): string {
   return [
     "**OpenClaw commands**",
     "",
-    "- `!help` — show this message",
-    "- `!status` — server/bot/agent status",
-    "- `!bots` — list bot accounts and their agent bindings",
-    "- `!groups` — list groups this bot is in",
-    "- `!access` — who can use this bot and where",
-    "- `!add-bot <username>` — create a new bot (comes online + DMs you, no restart)",
-    "- `!remove-bot <username>` — delete a bot account (server user + config)",
-    "- `!lend <group> <user>` — grant a user access to this bot in a group",
-    "- `!revoke <group> <user>` — remove a user's access to this bot in a group",
+    "- `!help` - show this message",
+    "- `!status` - server/bot/agent status",
+    "- `!bots` - list bot accounts and their agent bindings",
+    "- `!groups` - list groups this bot is in",
+    "- `!access` - who can use this bot and where",
+    "- `!add-bot <username>` - create a new bot (comes online + DMs you, no restart)",
+    "- `!remove-bot <username>` - delete a bot account (server user + config)",
+    "- `!add-group <group> [<bot>]` - invite a bot into a group/channel (defaults to this bot)",
+    "- `!lend <group> <user>` - grant a user access to this bot in a group",
+    "- `!revoke <group> <user>` - remove a user's access to this bot in a group",
+    "- `!bindings` - how to manage agents/bindings via OpenClaw CLI (official docs)",
     "",
     "Agent/model binding is managed by OpenClaw itself (see docs: openclaw.ai/cli/agents).",
+  ].join("\n");
+}
+
+function buildBindingsHelpText(): string {
+  return [
+    "**Agent & bindings (managed by OpenClaw CLI)**",
+    "This plugin does not manage agents/bindings - use the official OpenClaw commands:",
+    "",
+    "List agents + bindings:",
+    "  `openclaw agents list --bindings`",
+    "",
+    "Add a new agent:",
+    "  `openclaw agents add <id>`",
+    "",
+    "Set agent identity (name/emoji/avatar):",
+    '  `openclaw agents set-identity --agent <id> --name "..."`',
+    "",
+    "Check channel connectivity:",
+    "  `openclaw channels status --probe`",
+    "",
+    "Restart the gateway (apply binding changes):",
+    "  `openclaw gateway restart`",
+    "",
+    "Docs:",
+    "- Agents CLI: https://docs.openclaw.ai/cli/agents",
+    "- Multi-agent routing: https://docs.openclaw.ai/concepts/multi-agent",
+    "- Models: https://docs.openclaw.ai/concepts/models",
   ].join("\n");
 }
 
@@ -140,13 +173,11 @@ function runBots(): string {
     const mention = account.mentionNames[0] ?? account.accountId;
     const bindings = readBindingsForAccount(account.accountId);
     if (bindings.length === 0) {
-      lines.push(`- @${mention} — (no agent bound)`);
+      lines.push(`- @${mention} - (no agent bound)`);
       continue;
     }
     for (const binding of bindings) {
-      const scope = binding.peer
-        ? `${binding.peer.kind} ${binding.peer.id}`
-        : "global";
+      const scope = binding.peer ? `${binding.peer.kind} ${binding.peer.id}` : "global";
       lines.push(`- @${mention} → ${binding.agentId} (${scope})`);
     }
   }
@@ -181,13 +212,13 @@ async function runAccess(ctx: CommandContext): Promise<string> {
   store.close();
 
   const lines: string[] = [];
-  lines.push(`owner — ${owner ? `@${owner}` : "(unset)"}`);
+  lines.push(`owner - ${owner ? `@${owner}` : "(unset)"}`);
   if (grants.length === 0) {
     lines.push("No grants. Only the owner can use the bot.");
   } else {
     for (const grant of grants) {
       const where = grant.roomId === "*" ? "everywhere" : `#${grant.roomName ?? grant.roomId}`;
-      lines.push(`- @${grant.username} — ${where}`);
+      lines.push(`- @${grant.username} - ${where}`);
     }
   }
 
@@ -241,9 +272,9 @@ async function runStatus(ctx: CommandContext): Promise<string> {
   const server = ctx.account.serverUrl;
   return [
     "**Status**",
-    `- server — ${online ? "online" : "offline"} (${server})`,
-    `- bot — @${mention}`,
-    `- agent — ${agent}`,
+    `- server - ${online ? "online" : "offline"} (${server})`,
+    `- bot - @${mention}`,
+    `- agent - ${agent}`,
   ].join("\n");
 }
 
@@ -253,20 +284,40 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
   if (!username) {
     return [
       "**Create a new bot user**",
-      "Usage: `!add-bot <username> [--name \"...\"] [--email ...] [--agent main]`",
+      'Usage: `!add-bot <username> [--name "..."] [--email ...] [--agent <id>]`',
       "",
       "Examples:",
-      "  `!add-bot alice` — quick create with defaults",
-      "  `!add-bot alice --name \"Alice Smith\" --email alice@example.com --agent support`",
+      "  `!add-bot alice` - quick create; auto-creates a dedicated agent `rc-alice`",
+      '  `!add-bot alice --name "Alice Smith" --email alice@example.com --agent support`',
       "",
-      "A random password is generated and shown once. The bot comes online automatically — no restart needed.",
+      "By default each bot gets its own dedicated agent (`rc-<username>`), so memory is isolated. " +
+        "Pass `--agent <id>` to bind the bot to an existing shared agent instead (e.g. `main`, `work`).",
+      "",
+      "A random password is generated and shown once. The bot comes online automatically.",
     ].join("\n");
   }
 
   const name = flags.name ?? username;
   const email = flags.email ?? `${username.toLowerCase()}@openclaw.local`;
-  const agent = flags.agent ?? "main";
   const password = randomToken(16);
+
+  let agent: string;
+  let agentNote = "";
+  if (flags.agent) {
+    agent = flags.agent;
+  } else {
+    const result = ensureAgentForBot(username);
+    agent = result.agentId;
+    if (result.fallback) {
+      return [
+        `Created bot @${username}, but could not auto-create a dedicated agent.`,
+        `Falling back to 'main' - memory is isolated per-bot via session keys, but the bot shares the main agent workspace.`,
+      ].join("\n");
+    }
+    if (result.created) {
+      agentNote = ` (auto-created dedicated agent '${agent}')`;
+    }
+  }
 
   try {
     const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
@@ -294,10 +345,9 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
           botAuth,
           dmRoom,
           `Hi! I'm @${username}, your new Rocket.Chat bot connected to OpenClaw (agent \`${agent}\`). ` +
-            `Give me a few seconds to come online, then check \`!status\` — once the server shows online, you can start talking to me. ` +
-            `Type \`!help\` anytime to explore commands.`,
+            `Once you see status online, confirm with \`!status\` or \`!help\` to know more.`,
         );
-        dmNote = `I've sent a welcome DM to @${owner}.`;
+        dmNote = `Welcome DM sent to @${owner}.`;
       } catch (e: unknown) {
         dmNote = `Could not DM @${owner}: ${e instanceof Error ? e.message : String(e)}`;
       }
@@ -313,9 +363,8 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
 
     return [
       `**Created bot @${username}**`,
-      `- agent — ${agent}`,
-      `- password (auto-generated, shown once) — \`${password}\``,
-      `It is now online — no restart needed.`,
+      `agent - ${agent}${agentNote}`,
+      `password (shown once) - \`${password}\``,
       ...(dmNote ? [dmNote] : []),
     ].join("\n");
   } catch (e: unknown) {
@@ -348,10 +397,13 @@ function startBotAccount(
     },
     channelRuntime: ctx.channelRuntime,
     abortSignal: controller.signal,
-    setStatus: (status: string) => console.log(`[RC] [rocketchat:${account.accountId}] hot-start: ${status}`),
+    setStatus: (status: string) =>
+      console.log(`[RC] [rocketchat:${account.accountId}] hot-start: ${status}`),
   };
   startGateway(botCtx as Parameters<typeof startGateway>[0]).catch((err) =>
-    console.error(`[RC] [rocketchat:${account.accountId}] hot-start failed: ${err instanceof Error ? err.message : String(err)}`),
+    console.error(
+      `[RC] [rocketchat:${account.accountId}] hot-start failed: ${err instanceof Error ? err.message : String(err)}`,
+    ),
   );
 }
 
@@ -359,7 +411,8 @@ async function runLend(ctx: CommandContext, argStr: string): Promise<string> {
   const { positional } = parseArgs(argStr);
   const groupName = positional[0];
   const username = positional[1];
-  if (!groupName || !username) return "Usage: `!lend <group> <user>` — grant a user access to this bot in a group";
+  if (!groupName || !username)
+    return "Usage: `!lend <group> <user>` - grant a user access to this bot in a group";
 
   try {
     const auth = adminAuth(ctx);
@@ -388,7 +441,8 @@ async function runRevoke(ctx: CommandContext, argStr: string): Promise<string> {
   const { positional } = parseArgs(argStr);
   const groupName = positional[0];
   const username = positional[1];
-  if (!groupName || !username) return "Usage: `!revoke <group> <user>` — remove a user's access to this bot in a group";
+  if (!groupName || !username)
+    return "Usage: `!revoke <group> <user>` - remove a user's access to this bot in a group";
 
   try {
     const auth = adminAuth(ctx);
@@ -415,7 +469,8 @@ async function runRevoke(ctx: CommandContext, argStr: string): Promise<string> {
 async function runRemoveBot(ctx: CommandContext, argStr: string): Promise<string> {
   const { positional } = parseArgs(argStr);
   const username = positional[0]?.trim().replace(/^@+/, "");
-  if (!username) return "Usage: `!remove-bot <username>` — delete a bot account (server user + OpenClaw config)";
+  if (!username)
+    return "Usage: `!remove-bot <username>` - delete a bot account (server user + OpenClaw config)";
 
   try {
     const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
@@ -448,6 +503,40 @@ async function runRemoveBot(ctx: CommandContext, argStr: string): Promise<string
     ].join("\n");
   } catch (e: unknown) {
     return `Failed to remove bot: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+async function runAddGroup(ctx: CommandContext, argStr: string): Promise<string> {
+  const { positional } = parseArgs(argStr);
+  const groupName = positional[0]?.trim().replace(/^#+/, "");
+  const botName =
+    positional[1]?.trim().replace(/^@+/, "") || ctx.account.mentionNames[0] || ctx.accountId;
+  if (!groupName)
+    return "Usage: `!add-group <group> [<bot>]` - invite a bot into a group/channel (defaults to this bot)";
+
+  try {
+    const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
+
+    const group = await getGroupByName(ctx.account.serverUrl, auth, groupName);
+    if (!group) return `Group/channel "#${groupName}" not found.`;
+
+    const isPrivate = group.isPrivate;
+
+    const members = await listGroupMembers(ctx.account.serverUrl, auth, group._id);
+    const alreadyIn = members.some((m) => m.username.toLowerCase() === botName.toLowerCase());
+    if (alreadyIn) {
+      return `@${botName} is already a member of #${group.name}. No action needed.`;
+    }
+
+    try {
+      await inviteToGroup(ctx.account.serverUrl, auth, group._id, botName, isPrivate);
+    } catch (e: unknown) {
+      return `Failed to add @${botName} to #${group.name}: ${e instanceof Error ? e.message : String(e)}`;
+    }
+
+    return `Invited @${botName} to #${group.name}${isPrivate ? " (private group)" : " (channel)"}. The bot will start receiving messages there.`;
+  } catch (e: unknown) {
+    return `Failed to add bot to group: ${e instanceof Error ? e.message : String(e)}`;
   }
 }
 

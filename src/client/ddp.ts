@@ -37,7 +37,7 @@ export class RocketChatDdpConnection {
   async sendMessage(roomId: string, text: string, options?: { tmid?: string }): Promise<string> {
     const message: DdpMethodParams = { rid: roomId, msg: text };
     if (options?.tmid) message.tmid = options.tmid;
-    const result = await this.call("sendMessage", message) as DdpMethodParams;
+    const result = (await this.call("sendMessage", message)) as DdpMethodParams;
     return (result as { _id?: string })._id ?? "";
   }
 
@@ -83,21 +83,15 @@ export class RocketChatDdpConnection {
 
       await sdk.account.loginWithToken(this.options.authToken);
 
-      const sub = sdk.stream(
-        "room-messages",
-        "__my_messages__",
-        (...args: unknown[]) => {
-          const message = args[0] as RocketChatMessageRecord | undefined;
-          if (message) this.options.onMessage(message);
-        },
-      );
+      const sub = sdk.stream("room-messages", "__my_messages__", (...args: unknown[]) => {
+        const message = args[0] as RocketChatMessageRecord | undefined;
+        if (message) this.options.onMessage(message);
+      });
       this.subscription = sub;
       await sub.ready();
       this.options.onStatus?.("ready");
     } catch (err) {
-      this.options.onError?.(
-        err instanceof Error ? err : new Error(String(err)),
-      );
+      this.options.onError?.(err instanceof Error ? err : new Error(String(err)));
     }
   }
 }

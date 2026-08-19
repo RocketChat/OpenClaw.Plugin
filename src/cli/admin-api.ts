@@ -18,7 +18,7 @@ function extractString(obj: Record<string, unknown>, key: string): string {
   return v;
 }
 
-  type RCFetchOpts = {
+type RCFetchOpts = {
   method?: string;
   body?: Record<string, unknown>;
   userId?: string;
@@ -26,7 +26,11 @@ function extractString(obj: Record<string, unknown>, key: string): string {
   raw?: boolean;
 };
 
-async function adminFetch(baseUrl: string, path: string, opts: RCFetchOpts = {}): Promise<JsonObject> {
+async function adminFetch(
+  baseUrl: string,
+  path: string,
+  opts: RCFetchOpts = {},
+): Promise<JsonObject> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (opts.userId && opts.authToken) {
     headers["X-Auth-Token"] = opts.authToken;
@@ -71,7 +75,8 @@ function parseLoginChallenge(json: JsonObject): LoginChallenge | null {
   // never sent (e.g. a bot account without 2FA provisioned).
   const explicitChallenge =
     /^(totp-required|code-required|email-required|totp-invalid|code-invalid)$/i.test(errorType) ||
-    (status === "error" && /(two-factor|verification code|2fa|totp|enter the code)/i.test(message)) ||
+    (status === "error" &&
+      /(two-factor|verification code|2fa|totp|enter the code)/i.test(message)) ||
     /totp-required|code-required|email-required/i.test(errorType);
 
   if (!explicitChallenge) return null;
@@ -127,7 +132,7 @@ export async function loginAs(
 export async function createBotUser(
   baseUrl: string,
   auth: RCLoginResult,
-  opts: { username: string; name: string; password: string; email: string }
+  opts: { username: string; name: string; password: string; email: string },
 ): Promise<RCUser> {
   const json = await adminFetch(baseUrl, "/api/v1/users.create", {
     userId: auth.userId,
@@ -144,10 +149,18 @@ export async function createBotUser(
     },
   });
   const userRecord = extractRecord(json, "user");
-  return { _id: extractString(userRecord, "_id"), username: extractString(userRecord, "username"), name: extractString(userRecord, "name") };
+  return {
+    _id: extractString(userRecord, "_id"),
+    username: extractString(userRecord, "username"),
+    name: extractString(userRecord, "name"),
+  };
 }
 
-export async function deleteUser(baseUrl: string, auth: RCLoginResult, username: string): Promise<void> {
+export async function deleteUser(
+  baseUrl: string,
+  auth: RCLoginResult,
+  username: string,
+): Promise<void> {
   await adminFetch(baseUrl, "/api/v1/users.delete", {
     userId: auth.userId,
     authToken: auth.authToken,
@@ -182,7 +195,10 @@ export type VerifyAdminResult =
   | { ok: false; reason: "unauthorized" }
   | { ok: false; reason: "unreachable" };
 
-export async function verifyAdmin(baseUrl: string, auth: RCLoginResult): Promise<VerifyAdminResult> {
+export async function verifyAdmin(
+  baseUrl: string,
+  auth: RCLoginResult,
+): Promise<VerifyAdminResult> {
   try {
     const user = await getUserInfo(baseUrl, auth, { userId: auth.userId });
     const roles = (user as unknown as { roles?: string[] } | null)?.roles;
@@ -196,7 +212,11 @@ export async function verifyAdmin(baseUrl: string, auth: RCLoginResult): Promise
   }
 }
 
-export async function createDirectMessage(baseUrl: string, auth: RCLoginResult, username: string): Promise<string> {
+export async function createDirectMessage(
+  baseUrl: string,
+  auth: RCLoginResult,
+  username: string,
+): Promise<string> {
   const json = await adminFetch(baseUrl, "/api/v1/im.create", {
     userId: auth.userId,
     authToken: auth.authToken,
@@ -206,7 +226,12 @@ export async function createDirectMessage(baseUrl: string, auth: RCLoginResult, 
   return extractString(room, "_id");
 }
 
-export async function sendMessage(baseUrl: string, auth: RCLoginResult, roomId: string, text: string): Promise<void> {
+export async function sendMessage(
+  baseUrl: string,
+  auth: RCLoginResult,
+  roomId: string,
+  text: string,
+): Promise<void> {
   await adminFetch(baseUrl, "/api/v1/chat.postMessage", {
     userId: auth.userId,
     authToken: auth.authToken,
@@ -217,7 +242,7 @@ export async function sendMessage(baseUrl: string, auth: RCLoginResult, roomId: 
 export interface RocketChatGroup {
   _id: string;
   name: string;
- 
+
   isPrivate?: boolean;
 }
 
@@ -227,7 +252,11 @@ export interface RocketChatMember {
   name?: string;
 }
 
-export async function listGroupMembers(baseUrl: string, auth: RCLoginResult, roomId: string): Promise<RocketChatMember[]> {
+export async function listGroupMembers(
+  baseUrl: string,
+  auth: RCLoginResult,
+  roomId: string,
+): Promise<RocketChatMember[]> {
   for (const endpoint of ["/api/v1/groups.members", "/api/v1/channels.members"]) {
     try {
       const url = new URL(endpoint, baseUrl);
@@ -238,20 +267,25 @@ export async function listGroupMembers(baseUrl: string, auth: RCLoginResult, roo
         userId: auth.userId,
         authToken: auth.authToken,
       });
-      const members = (json.members as Array<{ _id?: string; username?: string; name?: string }> | undefined) ?? [];
+      const members =
+        (json.members as Array<{ _id?: string; username?: string; name?: string }> | undefined) ??
+        [];
       const resolved = members
         .map((m) => ({ _id: m._id ?? "", username: m.username ?? "", name: m.name ?? "" }))
         .filter((m) => m._id && m.username);
       if (resolved.length > 0 || json.members !== undefined) {
         return resolved;
       }
-    } catch {
-    }
+    } catch {}
   }
   return [];
 }
 
-export async function listPublicChannels(baseUrl: string, auth: RCLoginResult, count = 100): Promise<RocketChatGroup[]> {
+export async function listPublicChannels(
+  baseUrl: string,
+  auth: RCLoginResult,
+  count = 100,
+): Promise<RocketChatGroup[]> {
   const url = new URL("/api/v1/channels.list", baseUrl);
   url.searchParams.set("count", String(count));
   const json = await adminFetch(baseUrl, url.toString(), {
@@ -265,8 +299,11 @@ export async function listPublicChannels(baseUrl: string, auth: RCLoginResult, c
     .map((c) => ({ _id: c._id, name: c.name, isPrivate: c.t === "p" }));
 }
 
-
-export async function listGroups(baseUrl: string, auth: RCLoginResult, count = 100): Promise<RocketChatGroup[]> {
+export async function listGroups(
+  baseUrl: string,
+  auth: RCLoginResult,
+  count = 100,
+): Promise<RocketChatGroup[]> {
   const json = await adminFetch(baseUrl, `/api/v1/groups.list?count=${count}`, {
     method: "GET",
     userId: auth.userId,
@@ -278,8 +315,11 @@ export async function listGroups(baseUrl: string, auth: RCLoginResult, count = 1
     .map((g) => ({ _id: g._id, name: g.name, isPrivate: g.t === "p" }));
 }
 
-
-export async function getGroupByName(baseUrl: string, auth: RCLoginResult, name: string): Promise<RocketChatGroup | null> {
+export async function getGroupByName(
+  baseUrl: string,
+  auth: RCLoginResult,
+  name: string,
+): Promise<RocketChatGroup | null> {
   for (const endpoint of ["/api/v1/groups.info", "/api/v1/channels.info"]) {
     try {
       const url = new URL(endpoint, baseUrl);
@@ -289,17 +329,23 @@ export async function getGroupByName(baseUrl: string, auth: RCLoginResult, name:
         userId: auth.userId,
         authToken: auth.authToken,
       });
-      const group = (json.group ?? json.channel) as { _id: string; name?: string; t?: string } | undefined;
+      const group = (json.group ?? json.channel) as
+        { _id: string; name?: string; t?: string } | undefined;
       if (group?._id) {
         return { _id: group._id, name: group.name ?? name, isPrivate: group.t === "p" };
       }
-    } catch {
-    }
+    } catch {}
   }
   return null;
 }
 
-export async function kickFromGroup(baseUrl: string, auth: RCLoginResult, groupId: string, username: string, isPrivate = true): Promise<void> {
+export async function kickFromGroup(
+  baseUrl: string,
+  auth: RCLoginResult,
+  groupId: string,
+  username: string,
+  isPrivate = true,
+): Promise<void> {
   const endpoint = isPrivate ? "/api/v1/groups.kick" : "/api/v1/channels.kick";
   await adminFetch(baseUrl, endpoint, {
     userId: auth.userId,
@@ -308,7 +354,13 @@ export async function kickFromGroup(baseUrl: string, auth: RCLoginResult, groupI
   });
 }
 
-export async function inviteToGroup(baseUrl: string, auth: RCLoginResult, groupId: string, username: string, isPrivate = true): Promise<void> {
+export async function inviteToGroup(
+  baseUrl: string,
+  auth: RCLoginResult,
+  groupId: string,
+  username: string,
+  isPrivate = true,
+): Promise<void> {
   const endpoint = isPrivate ? "/api/v1/groups.invite" : "/api/v1/channels.invite";
   await adminFetch(baseUrl, endpoint, {
     userId: auth.userId,

@@ -12,7 +12,11 @@ function key(accountId: string, roomId: string): string {
   return `${accountId}:${roomId}`;
 }
 
-export function appendGroupHistory(accountId: string, roomId: string, entry: GroupHistoryEntry): void {
+export function appendGroupHistory(
+  accountId: string,
+  roomId: string,
+  entry: GroupHistoryEntry,
+): void {
   const k = key(accountId, roomId);
   let history = store.get(k);
   if (!history) {

@@ -13,7 +13,10 @@
     "openclaw-rocketchat": "dist/cli/index.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "pnpm run manifest && tsc",
+    "manifest": "tsx scripts/gen-manifest.mts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "start": "node dist/index.js",
     "setup": "node --import tsx src/cli/index.ts setup"
   },
@@ -38,6 +41,7 @@
     "@types/node": "^25.9.1",
     "@types/ws": "^8.18.1",
     "openclaw": "^2026.7.1-2",
+    "prettier": "^3.9.6",
     "tsx": "^4.22.4",
     "typescript": "^6.0.3"
   },
@@ -45,6 +49,7 @@
     "@clack/prompts": "^1.7.0",
     "@rocket.chat/ddp-client": "^1.1.1",
     "commander": "^15.0.0",
+    "json5": "^2.2.3",
     "picocolors": "^1.1.1",
     "zod": "^4.4.3"
   },

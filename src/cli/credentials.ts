@@ -47,7 +47,6 @@ async function readJson<T>(path: string): Promise<T | null> {
 }
 
 export async function saveAdmin(admin: AdminCredentials): Promise<void> {
-
   if (existsSync(ADMIN_FILE)) {
     await mkdir(dirname(ADMIN_FILE), { recursive: true });
     await writeFile(ADMIN_FILE + ".bak", await readFile(ADMIN_FILE), { mode: 0o600 });
