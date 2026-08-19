@@ -1,13 +1,5 @@
 # Rocket.Chat Plugin for OpenClaw
 A channel plugin for [OpenClaw](https://opencode.ai) that enables direct integration with [Rocket.Chat](https://rocket.chat), no external bridge server needed. It handles inbound message polling, outbound delivery, session management, and agent orchestration through a single plugin.
-                                     1. Code review, Merge current branch ko
-                                     2. leftovers : Concurrency, Rate limits, security, UX, Docs, tests, publish to npm
-                                     3. Testing with fresh Openclaw setup + Skills and everything like testing it properly
-                                     4. Approaches and code and check if any features left
-                                     5. Openclaw config and warnings issues ko fix
-                                     6. Video, Bindings test
-                                     7. Adding more commands : https://github.com/Kxiandaoyan/openclaw-rocketchat/blob/master/docs/COMMANDS.en.md
-                                     8. Bindings during add bot  One bot bound to one Agent, use multiple bots for multiple Agents. This is the officially recommended approach — most stable and simplest.
 
 ## Architecture
 The plugin uses REST polling on a configurable interval to fetch new messages from Rocket.Chat subscriptions. On each poll cycle, it checks for updated subscriptions via `subscriptions.get`, syncs new messages per room via `chat.syncMessages`, deduplicates using an in-memory Set combined with an on-disk checkpoint file, filters out system events and the bot's own messages, and dispatches user messages to OpenClaw's agent runtime. The outbound path delivers agent replies directly to Rocket.Chat rooms via `chat.postMessage`. A checkpoint file at `~/.openclaw/rocketchat/<accountId>.json` persists the last 250 message IDs and timestamp across restarts.

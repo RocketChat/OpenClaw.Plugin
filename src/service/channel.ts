@@ -131,8 +131,6 @@ function buildHelpText(): string {
     "- `!lend <group> <user>` - grant a user access to this bot in a group",
     "- `!revoke <group> <user>` - remove a user's access to this bot in a group",
     "- `!bindings` - how to manage agents/bindings via OpenClaw CLI (official docs)",
-    "",
-    "Agent/model binding is managed by OpenClaw itself (see docs: openclaw.ai/cli/agents).",
   ].join("\n");
 }
 
