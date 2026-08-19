@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, renameSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, renameSync, readdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -9,7 +9,7 @@ const OC_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
 
 export type TokenAuth = Extract<AuthCredentials, { mode: "token" }>;
 
-function readConfig(): JsonObject {
+export function readConfig(): JsonObject {
   if (!existsSync(OC_CONFIG_PATH)) return {};
   return JSON5.parse(readFileSync(OC_CONFIG_PATH, "utf-8"));
 }
@@ -306,4 +306,9 @@ export function removeAccount(accountId: string): void {
     delete accounts[accountId];
   }
   writeConfig(cfg);
+}
+
+export function removeAgentDir(accountId: string): void {
+  const dir = resolve(homedir(), ".openclaw", "agents", `rc-${accountId}`);
+  if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
 }

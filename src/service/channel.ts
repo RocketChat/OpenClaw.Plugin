@@ -12,6 +12,7 @@ import {
   ensureAgentForBot,
   removeBindingsForAccount,
   removeAccount,
+  removeAgentDir,
   type ExistingAccount,
   type TokenAuth,
 } from "../cli/config-updater.js";
@@ -493,13 +494,23 @@ async function runRemoveBot(ctx: CommandContext, argStr: string): Promise<string
       serverNote = `Could not delete Rocket.Chat user: ${e instanceof Error ? e.message : String(e)}`;
     }
 
+    const existingBindings = readBindingsForAccount(username);
+    const boundAgent = existingBindings[0]?.agentId;
+    const ownsDedicatedAgent = boundAgent === `rc-${username}`;
+
     removeBindingsForAccount(username);
     removeAccount(username);
+    if (ownsDedicatedAgent) {
+      removeAgentDir(username);
+    }
 
     return [
       `**Removed bot @${username}**`,
       `- ${serverNote}`,
       `- OpenClaw config account + agent binding removed.`,
+      ownsDedicatedAgent
+        ? `- Agent workspace \`rc-${username}\` removed.`
+        : `- Kept shared agent \`${boundAgent}\` (bot was not its owner).`,
     ].join("\n");
   } catch (e: unknown) {
     return `Failed to remove bot: ${e instanceof Error ? e.message : String(e)}`;

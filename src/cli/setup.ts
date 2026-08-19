@@ -35,7 +35,7 @@ import type { RCLoginResult } from "../types.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_PATH = resolve(__dirname, "..", "..");
-const ACCOUNT_ID = "main";
+let ACCOUNT_ID = "main";
 const OC_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
 
 async function tryBotLogin(
@@ -305,12 +305,15 @@ export async function runSetup(): Promise<void> {
       return undefined;
     },
   });
+  ACCOUNT_ID = botUsername;
 
   const botAuth = await resolveBotAuth(rcUrl, adminAuth, botUsername);
   if (!botAuth) {
     p.log.error("Bot authentication failed. Setup aborted.");
     return;
   }
+
+  const agentResult = ensureAgentForBot(ACCOUNT_ID);
 
   try {
     await withSpinner("Sending welcome DM", async () => {
@@ -319,7 +322,8 @@ export async function runSetup(): Promise<void> {
         rcUrl,
         botAuth,
         dmRoomId,
-        "OpenClaw is connected! Send me a message to start chatting.",
+        `Hi! I'm @${botUsername}, your new Rocket.Chat bot connected to OpenClaw (agent \`${agentResult.agentId}\`). ` +
+          `Once you see status online, confirm with \`!status\` or \`!help\` to know more.`,
       );
     });
     p.log.success(`Welcome message sent to ${color.cyan(`@${botUsername}`)}`);
@@ -353,14 +357,15 @@ export async function runSetup(): Promise<void> {
     p.log.warn(`Config update skipped: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  const agentResult = ensureAgentForBot(ACCOUNT_ID);
   if (agentResult.fallback) {
     p.log.warn(
       `Could not auto-create dedicated agent 'rc-${ACCOUNT_ID}'. Bound to 'main' — ` +
         `memory is isolated per-bot via session keys, but shares the main agent workspace.`,
     );
   } else if (agentResult.created) {
-    p.log.success(`Created dedicated agent 'rc-${ACCOUNT_ID}' for this bot`);
+    p.log.success(`agent — ${agentResult.agentId} (auto-created dedicated agent '${agentResult.agentId}')`);
+  } else {
+    p.log.success(`agent — ${agentResult.agentId}`);
   }
   try {
     addBinding({ channel: "rocketchat", accountId: ACCOUNT_ID, agentId: agentResult.agentId });
