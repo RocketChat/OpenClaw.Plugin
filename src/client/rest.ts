@@ -102,6 +102,21 @@ export class RocketChatClient {
   }
 
   async postMessage(roomId: string, text: string, options?: { tmid?: string }): Promise<string> {
+    try {
+      return await this.postMessageRaw(roomId, text, options);
+    } catch (err) {
+      if (err instanceof RocketChatClientError && err.message.includes("/message/md")) {
+        return await this.postMessageRaw(roomId, stripMarkdown(text), options);
+      }
+      throw err;
+    }
+  }
+
+  private async postMessageRaw(
+    roomId: string,
+    text: string,
+    options?: { tmid?: string },
+  ): Promise<string> {
     const body: Record<string, string> = { roomId, text };
     if (options?.tmid) body.tmid = options.tmid;
     const payload = await this.requestJson(new URL("/api/v1/chat.postMessage", this.serverUrl), {
@@ -363,4 +378,28 @@ function getRetryAfterMs(response: Response, payload: JsonObject): number {
   }
 
   return 30_000;
+}
+
+function stripMarkdown(text: string): string {
+  const separatorRe = /^[-:]+$/;
+  return text
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^>\s+/gm, "")
+    .replace(/^[-*+]\s+/gm, "• ")
+    .replace(/^\d+\.\s+/gm, "• ")
+    .replace(/```[\s\S]*?```/g, (m) => m.replace(/```/g, "").trim())
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/~~([^~]+)~~/g, "$1")
+    .replace(/^\|(.+)\|$/gm, (_m, inner: string) =>
+      inner
+        .split("|")
+        .map((c: string) => c.trim())
+        .filter((c: string) => c.length > 0 && !separatorRe.test(c))
+        .join(" | "),
+    )
+    .replace(/^---+$/gm, "")
+    .trim();
 }

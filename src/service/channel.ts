@@ -24,6 +24,7 @@ import {
   createDirectMessage,
   sendMessage,
   deleteUser,
+  getUserInfo,
   inviteToGroup,
   listGroupMembers,
 } from "../cli/admin-api.js";
@@ -70,7 +71,10 @@ export type CommandContext = {
   channelRuntime?: import("../types.js").ChannelRuntimeLike;
 };
 
-export type CommandResult = { action: "reply"; replyText: string } | { action: "passthrough" };
+export type CommandResult =
+  | { action: "reply"; replyText: string }
+  | { action: "passthrough" }
+  | { action: "openclaw-command"; command: string };
 
 const COMMAND_RE = /^\s*!(\S+)(?:\s+([\s\S]*))?$/i;
 
@@ -108,6 +112,28 @@ export async function matchCommand(text: string, ctx: CommandContext): Promise<C
       return { action: "reply", replyText: await runRemoveBot(ctx, argStr) };
     case "add-group":
       return { action: "reply", replyText: await runAddGroup(ctx, argStr) };
+    case "compact":
+      return { action: "openclaw-command", command: `/compact${argStr ? " " + argStr : ""}` };
+    case "clear":
+      return { action: "openclaw-command", command: `/clear${argStr ? " " + argStr : ""}` };
+    case "reset":
+      return { action: "openclaw-command", command: `/reset${argStr ? " " + argStr : ""}` };
+    case "new":
+      return { action: "openclaw-command", command: `/new${argStr ? " " + argStr : ""}` };
+    case "model":
+      return { action: "openclaw-command", command: `/model${argStr ? " " + argStr : ""}` };
+    case "agents":
+      return { action: "openclaw-command", command: `/agents${argStr ? " " + argStr : ""}` };
+    case "agent":
+      return { action: "openclaw-command", command: `/agent${argStr ? " " + argStr : ""}` };
+    case "think":
+      return { action: "openclaw-command", command: `/think${argStr ? " " + argStr : ""}` };
+    case "abort":
+      return { action: "openclaw-command", command: `/abort${argStr ? " " + argStr : ""}` };
+    case "reasoning":
+      return { action: "openclaw-command", command: `/reasoning${argStr ? " " + argStr : ""}` };
+    case "verbose":
+      return { action: "openclaw-command", command: `/verbose${argStr ? " " + argStr : ""}` };
     default:
       return {
         action: "reply",
@@ -120,6 +146,7 @@ function buildHelpText(): string {
   return [
     "**OpenClaw commands**",
     "",
+    "**Plugin commands:**",
     "- `!help` - show this message",
     "- `!status` - server/bot/agent status",
     "- `!bots` - list bot accounts and their agent bindings",
@@ -131,6 +158,23 @@ function buildHelpText(): string {
     "- `!lend <group> <user>` - grant a user access to this bot in a group",
     "- `!revoke <group> <user>` - remove a user's access to this bot in a group",
     "- `!bindings` - how to manage agents/bindings via OpenClaw CLI (official docs)",
+    "",
+    "**Conversation context:**",
+    "- `!compact` - compress old messages to free context space",
+    "- `!clear` - clear messages, keep memory",
+    "- `!reset` - full reset (messages + memory)",
+    "- `!new [model]` - fresh start, optionally switch model",
+    "",
+    "**Model & Agent:**",
+    "- `!model [name|number]` - list or switch models",
+    "- `!agents` - list available agents",
+    "- `!agent <id>` - switch to a specific agent",
+    "",
+    "**Behavior:**",
+    "- `!think <level>` - set reasoning depth (off/minimal/low/medium/high)",
+    "- `!abort` - stop current AI response",
+    "- `!reasoning <on/off>` - show reasoning as separate message",
+    "- `!verbose <on/off>` - show debug/tool call details",
   ].join("\n");
 }
 
@@ -320,6 +364,16 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
 
   try {
     const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
+
+    const existingServer = await getUserInfo(ctx.account.serverUrl, auth, { username });
+    const existingConfig = readAccount(username.toLowerCase());
+    if (existingServer) {
+      return `Bot @${username} already exists on the Rocket.Chat server. Use \`!remove-bot ${username}\` first if you want to recreate it.`;
+    }
+    if (existingConfig) {
+      return `Bot @${username} already exists in OpenClaw config. Use \`!remove-bot ${username}\` first if you want to recreate it.`;
+    }
+
     await createBotUser(ctx.account.serverUrl, auth, { username, name, password, email });
     const botAuth = await loginAs(ctx.account.serverUrl, username, password);
     const accountId = username;
@@ -414,22 +468,26 @@ async function runLend(ctx: CommandContext, argStr: string): Promise<string> {
     return "Usage: `!lend <group> <user>` - grant a user access to this bot in a group";
 
   try {
-    const auth = adminAuth(ctx);
+    const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
     const group = await getGroupByName(ctx.account.serverUrl, auth, groupName);
     if (!group) return `Group "${groupName}" not found.`;
+
+    const cleanUser = username.replace(/^@+/, "");
+    const userExists = await getUserInfo(ctx.account.serverUrl, auth, { username: cleanUser });
+    if (!userExists) return `User @${cleanUser} not found on the Rocket.Chat server.`;
 
     const store = new AccessStore();
     const ok = store.addGrant({
       accountId: ctx.accountId,
       roomId: group._id,
       roomName: group.name,
-      username: username.replace(/^@+/, ""),
+      username: cleanUser,
       ...(ctx.account.owner ? { grantedBy: ctx.account.owner } : {}),
     });
     store.close();
 
     return ok
-      ? `Granted @${username.replace(/^@+/, "")} access to @${ctx.account.mentionNames[0] ?? ctx.accountId} in #${group.name}.`
+      ? `Granted @${cleanUser} access to @${ctx.account.mentionNames[0] ?? ctx.accountId} in #${group.name}.`
       : `That grant already exists.`;
   } catch (e: unknown) {
     return `Failed to lend: ${e instanceof Error ? e.message : String(e)}`;
@@ -444,22 +502,26 @@ async function runRevoke(ctx: CommandContext, argStr: string): Promise<string> {
     return "Usage: `!revoke <group> <user>` - remove a user's access to this bot in a group";
 
   try {
-    const auth = adminAuth(ctx);
+    const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
     const group = await getGroupByName(ctx.account.serverUrl, auth, groupName);
     if (!group) return `Group "${groupName}" not found.`;
+
+    const cleanUser = username.replace(/^@+/, "");
+    const userExists = await getUserInfo(ctx.account.serverUrl, auth, { username: cleanUser });
+    if (!userExists) return `User @${cleanUser} not found on the Rocket.Chat server.`;
 
     const store = new AccessStore();
     const ok = store.removeGrant({
       accountId: ctx.accountId,
       roomId: group._id,
-      username: username.replace(/^@+/, ""),
+      username: cleanUser,
       ...(ctx.account.owner ? { revokedBy: ctx.account.owner } : {}),
     });
     store.close();
 
     return ok
-      ? `Revoked @${username.replace(/^@+/, "")}'s access to @${ctx.account.mentionNames[0] ?? ctx.accountId} in #${group.name}.`
-      : `No such grant found.`;
+      ? `Revoked @${cleanUser}'s access to @${ctx.account.mentionNames[0] ?? ctx.accountId} in #${group.name}.`
+      : `No such grant found. @${cleanUser} did not have access in #${group.name}.`;
   } catch (e: unknown) {
     return `Failed to revoke: ${e instanceof Error ? e.message : String(e)}`;
   }
@@ -473,6 +535,12 @@ async function runRemoveBot(ctx: CommandContext, argStr: string): Promise<string
 
   try {
     const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
+
+    const configured = readAccount(username);
+    const onServer = await getUserInfo(ctx.account.serverUrl, auth, { username });
+    if (!configured && !onServer) {
+      return `No bot named @${username} found on the server or in OpenClaw config. Nothing to remove.`;
+    }
 
     const live = activeClients.get(username);
     if (live) {
@@ -525,6 +593,15 @@ async function runAddGroup(ctx: CommandContext, argStr: string): Promise<string>
 
   try {
     const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
+
+    const botExists = await getUserInfo(ctx.account.serverUrl, auth, { username: botName });
+    if (!botExists) {
+      return `Bot @${botName} not found on the Rocket.Chat server. Use \`!add-bot ${botName}\` to create it first.`;
+    }
+    const botConfigured = readAccount(botName.toLowerCase());
+    if (!botConfigured) {
+      return `@${botName} exists on the server but is not configured in OpenClaw. Use \`!add-bot ${botName}\` to set it up.`;
+    }
 
     const group = await getGroupByName(ctx.account.serverUrl, auth, groupName);
     if (!group) return `Group/channel "#${groupName}" not found.`;

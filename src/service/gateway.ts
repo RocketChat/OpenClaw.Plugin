@@ -326,6 +326,13 @@ async function startDdpGateway(
         return;
       }
 
+      if (cmdResult.action === "openclaw-command") {
+        event.text = cmdResult.command;
+        logger.info(
+          `[rocketchat:${accountId}] passthrough OpenClaw command: ${cmdResult.command}`,
+        );
+      }
+
       await markSeen(msg._id);
 
       if (!ctx.channelRuntime) {

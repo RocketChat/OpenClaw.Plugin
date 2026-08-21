@@ -61,6 +61,7 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     body: bodyForAgent,
   });
 
+  const isCommand = params.event.text.startsWith("/");
   const ctxPayload = params.channelRuntime.reply.finalizeInboundContext({
     Body: body,
     BodyForAgent: bodyForAgent,
@@ -83,6 +84,7 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     Timestamp: timestamp,
     OriginatingChannel: "rocketchat",
     OriginatingTo: to,
+    ...(isCommand ? { CommandSource: "text" as const, CommandAuthorized: true } : {}),
     ...(await buildMediaContext(params.event.attachments, params.client)),
   });
 

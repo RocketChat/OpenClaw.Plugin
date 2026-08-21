@@ -37,6 +37,18 @@ export const rocketchatPlugin = createChatChannelPlugin<ResolvedAccount>({
         account: ResolvedAccount,
         cfg: OpenClawConfig,
       ) => boolean,
+      formatAllowFrom: (params: {
+        cfg: OpenClawConfig;
+        accountId?: string | null;
+        allowFrom: Array<string | number>;
+      }): string[] => {
+        return params.allowFrom.map((entry) => {
+          const s = String(entry).trim();
+          if (!s || s === "*") return s;
+          if (s.startsWith("rocketchat:")) return s;
+          return `rocketchat:${s}`;
+        });
+      },
     },
     messaging: {
       targetPrefixes: ["rocketchat", "channel", "user", "@"],

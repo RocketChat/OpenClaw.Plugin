@@ -8,7 +8,7 @@ export default function register(api: OpenClawPluginApi): void {
 
   api.registerCli(
     ({ program }: { program: any }) => {
-      const rc = program.command("rocket-chat").description("Rocket.Chat channel plugin commands");
+      const rc = program.command("rocketchat").description("Rocket.Chat channel plugin commands");
 
       rc.command("setup")
         .description("Interactive setup wizard - connect Rocket.Chat to OpenClaw")
@@ -18,7 +18,7 @@ export default function register(api: OpenClawPluginApi): void {
         });
     },
     {
-      commands: ["rocket-chat", "rocket-chat setup"],
+      commands: ["rocketchat"],
     },
   );
 }
