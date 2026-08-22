@@ -72,7 +72,13 @@ export type CommandContext = {
   account: ExistingAccount;
   client: RocketChatClient;
   channelRuntime?: import("../types.js").ChannelRuntimeLike;
+  senderName?: string;
+  roomId?: string;
+  roomType?: import("../types.js").InboundEvent["roomType"];
 };
+
+/** Sentinel roomId used for grants that permit direct-message (DM) access only. */
+const DM_SCOPE = "dm";
 
 export type CommandResult =
   | { action: "reply"; replyText: string }
@@ -160,8 +166,10 @@ function buildHelpText(): string {
         ["add-bot <user>", "create a bot"],
         ["remove-bot <user>", "delete a bot"],
         ["add-group <group> [bot]", "invite bot to group"],
-        ["lend <group> <user>", "grant access"],
-        ["revoke <group> <user>", "revoke access"],
+        ["lend <group> <user>", "grant group access"],
+        ["lend dm <user>", "grant DM access"],
+        ["revoke <group> <user>", "revoke group access"],
+        ["revoke dm <user>", "revoke DM access"],
         ["bindings", "agent docs"],
       ],
     ],
@@ -341,7 +349,12 @@ async function runAccess(ctx: CommandContext): Promise<string> {
     lines.push("No grants. Only the owner can use the bot.");
   } else {
     for (const grant of grants) {
-      const where = grant.roomId === "*" ? "everywhere" : `#${grant.roomName ?? grant.roomId}`;
+      const where =
+        grant.roomId === "*"
+          ? "everywhere"
+          : grant.roomId === DM_SCOPE
+            ? "direct messages"
+            : `#${grant.roomName ?? grant.roomId}`;
       lines.push(`- @${grant.username} - ${where}`);
     }
   }
@@ -542,33 +555,62 @@ function startBotAccount(
 }
 
 async function runLend(ctx: CommandContext, argStr: string): Promise<string> {
-  const { positional } = parseArgs(argStr);
-  const groupName = positional[0];
-  const username = positional[1];
-  if (!groupName || !username)
-    return "Usage: `!lend <group> <user>` - grant a user access to this bot in a group";
+  const { positional, flags } = parseArgs(argStr);
+  const wantDm = flags.dm === "true";
+  let groupName: string | undefined;
+  let username: string | undefined;
+  if (positional[0]?.toLowerCase() === "dm") {
+    username = positional[1];
+    groupName = undefined;
+  } else if (wantDm) {
+    username = positional[0];
+    groupName = undefined;
+  } else {
+    groupName = positional[0];
+    username = positional[1];
+  }
+  if (!username)
+    return [
+      "Usage:",
+      "  `!lend <group> <user>` - grant group/channel access",
+      "  `!lend dm <user>` (or `!lend <user> --dm`) - grant DM access only",
+    ].join("\n");
+
+  const cleanUser = username.replace(/^@+/, "");
 
   try {
     const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
-    const group = await getGroupByName(ctx.account.serverUrl, auth, groupName);
-    if (!group) return `Group "${groupName}" not found.`;
-
-    const cleanUser = username.replace(/^@+/, "");
     const userExists = await getUserInfo(ctx.account.serverUrl, auth, { username: cleanUser });
     if (!userExists) return `User @${cleanUser} not found on the Rocket.Chat server.`;
+
+    let roomId: string;
+    let roomName: string;
+    if (groupName) {
+      const group = await getGroupByName(ctx.account.serverUrl, auth, groupName);
+      if (!group) return `Group "${groupName}" not found.`;
+      roomId = group._id;
+      roomName = group.name;
+    } else {
+      roomId = DM_SCOPE;
+      roomName = "direct";
+    }
+
+    const denial = assertCanDelegate(ctx, roomId);
+    if (denial) return denial;
 
     const store = new AccessStore();
     const ok = store.addGrant({
       accountId: ctx.accountId,
-      roomId: group._id,
-      roomName: group.name,
+      roomId,
+      roomName,
       username: cleanUser,
       ...(ctx.account.owner ? { grantedBy: ctx.account.owner } : {}),
     });
     store.close();
 
+    const scope = roomId === DM_SCOPE ? "direct messages" : `#${roomName}`;
     return ok
-      ? `Granted @${cleanUser} access to @${ctx.account.mentionNames[0] ?? ctx.accountId} in #${group.name}.`
+      ? `Granted @${cleanUser} access to @${ctx.account.mentionNames[0] ?? ctx.accountId} in ${scope}.`
       : `That grant already exists.`;
   } catch (e: unknown) {
     return `Failed to lend: ${e instanceof Error ? e.message : String(e)}`;
@@ -576,36 +618,87 @@ async function runLend(ctx: CommandContext, argStr: string): Promise<string> {
 }
 
 async function runRevoke(ctx: CommandContext, argStr: string): Promise<string> {
-  const { positional } = parseArgs(argStr);
-  const groupName = positional[0];
-  const username = positional[1];
-  if (!groupName || !username)
-    return "Usage: `!revoke <group> <user>` - remove a user's access to this bot in a group";
+  const { positional, flags } = parseArgs(argStr);
+  const wantDm = flags.dm === "true";
+  let groupName: string | undefined;
+  let username: string | undefined;
+  if (positional[0]?.toLowerCase() === "dm") {
+    username = positional[1];
+    groupName = undefined;
+  } else if (wantDm) {
+    username = positional[0];
+    groupName = undefined;
+  } else {
+    groupName = positional[0];
+    username = positional[1];
+  }
+  if (!username)
+    return [
+      "Usage:",
+      "  `!revoke <group> <user>` - remove a user's group/channel access",
+      "  `!revoke dm <user>` (or `!revoke <user> --dm`) - remove a user's DM access",
+    ].join("\n");
+
+  const cleanUser = username.replace(/^@+/, "");
 
   try {
     const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
-    const group = await getGroupByName(ctx.account.serverUrl, auth, groupName);
-    if (!group) return `Group "${groupName}" not found.`;
-
-    const cleanUser = username.replace(/^@+/, "");
     const userExists = await getUserInfo(ctx.account.serverUrl, auth, { username: cleanUser });
     if (!userExists) return `User @${cleanUser} not found on the Rocket.Chat server.`;
+
+    let roomId: string;
+    let roomName: string;
+    if (groupName) {
+      const group = await getGroupByName(ctx.account.serverUrl, auth, groupName);
+      if (!group) return `Group "${groupName}" not found.`;
+      roomId = group._id;
+      roomName = group.name;
+    } else {
+      roomId = DM_SCOPE;
+      roomName = "direct";
+    }
 
     const store = new AccessStore();
     const ok = store.removeGrant({
       accountId: ctx.accountId,
-      roomId: group._id,
+      roomId,
       username: cleanUser,
       ...(ctx.account.owner ? { revokedBy: ctx.account.owner } : {}),
     });
     store.close();
 
+    const scope = roomId === DM_SCOPE ? "direct messages" : `#${roomName}`;
     return ok
-      ? `Revoked @${cleanUser}'s access to @${ctx.account.mentionNames[0] ?? ctx.accountId} in #${group.name}.`
-      : `No such grant found. @${cleanUser} did not have access in #${group.name}.`;
+      ? `Revoked @${cleanUser}'s access to @${ctx.account.mentionNames[0] ?? ctx.accountId} in ${scope}.`
+      : `No such grant found. @${cleanUser} did not have access in ${scope}.`;
   } catch (e: unknown) {
     return `Failed to revoke: ${e instanceof Error ? e.message : String(e)}`;
   }
+}
+
+/**
+ * Non-owners may only delegate access within scopes where they themselves hold a grant.
+ * Returns an error string when delegation is not allowed, otherwise undefined.
+ */
+function assertCanDelegate(ctx: CommandContext, roomId: string): string | undefined {
+  const owner = ctx.account.owner?.trim().replace(/^@+/, "").toLowerCase();
+  const actor = ctx.senderName?.trim().replace(/^@+/, "").toLowerCase();
+  if (!actor || actor === owner) return undefined;
+
+  const store = new AccessStore();
+  const actorGrants = store.loadGrants(ctx.accountId);
+  store.close();
+
+  const allowed = actorGrants.some((g) => {
+    const gu = g.username.trim().replace(/^@+/, "").toLowerCase();
+    if (gu !== actor) return false;
+    if (roomId === DM_SCOPE) return g.roomId === DM_SCOPE;
+    return g.roomId === "*" || g.roomId === roomId;
+  });
+
+  return allowed
+    ? undefined
+    : "You can only grant access in spaces where you already have access.";
 }
 
 async function runRemoveBot(ctx: CommandContext, argStr: string): Promise<string> {

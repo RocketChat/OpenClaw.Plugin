@@ -110,6 +110,9 @@ async function handleMessage(
   await ddp?.sendTyping(event.roomId, false).catch(() => {});
 }
 
+/** Sentinel roomId used for grants that permit direct-message (DM) access only. */
+const DM_SCOPE = "dm";
+
 const OPENCLAW_CMD_NAMES = [
   "acp", "activation", "agents", "approve", "btw", "commands", "compact", "config",
   "context", "debug", "diagnostics", "elevated", "exec", "export-session",
@@ -424,7 +427,7 @@ async function startDdpGateway(
         return;
       }
 
-      if (isSenderDenied(event.senderName, account.owner, accountId, event.roomId)) {
+      if (isSenderDenied(event.senderName, account.owner, accountId, event.roomId, event.roomType)) {
         const sendCmd = client.postMessage.bind(client);
         const tmidOpt = event.tmid ? { tmid: event.tmid } : undefined;
         const ownerLabel = account.owner ? `@${account.owner}` : "the bot owner";
@@ -450,6 +453,9 @@ async function startDdpGateway(
           ...(account.owner ? { owner: account.owner } : {}),
         },
         client,
+        senderName: event.senderName,
+        roomId: event.roomId,
+        roomType: event.roomType,
         ...(ctx.channelRuntime ? { channelRuntime: ctx.channelRuntime } : {}),
       });
       logger.info(
@@ -538,11 +544,13 @@ function isSenderDenied(
   owner: string | undefined,
   accountId: string,
   roomId: string,
+  roomType: import("../types.js").InboundEvent["roomType"],
 ): boolean {
   const norm = senderName.trim().replace(/^@+/, "").toLowerCase();
   if (!norm) return true;
   if (owner && owner.trim().replace(/^@+/, "").toLowerCase() === norm) return false;
-  // Per-room grants created by `lend` (falls back to denial if the store is unavailable)
+  // Per-room grants created by `lend` (falls back to denial if the store is unavailable).
+  // A grant with roomId === DM_SCOPE ("dm") allows direct messages only.
   try {
     const store = new AccessStore();
     const granted = store
@@ -550,7 +558,9 @@ function isSenderDenied(
       .some(
         (g) =>
           g.username.trim().replace(/^@+/, "").toLowerCase() === norm &&
-          (g.roomId === "*" || g.roomId === roomId),
+          (g.roomId === "*" ||
+            g.roomId === roomId ||
+            (g.roomId === DM_SCOPE && roomType === "direct")),
       );
     store.close();
     if (granted) return false;
