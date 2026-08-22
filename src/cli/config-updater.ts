@@ -39,7 +39,11 @@ export function readAllAccounts(): ExistingAccount[] {
 
 export function readAccount(accountId = "main"): ExistingAccount | null {
   const cfg = readConfig() as Record<string, any>;
-  const account = cfg?.channels?.rocketchat?.accounts?.[accountId];
+  const accounts = cfg?.channels?.rocketchat?.accounts;
+  if (!accounts || typeof accounts !== "object") return null;
+  const target = accountId.toLowerCase();
+  const key = Object.keys(accounts).find((k) => k.toLowerCase() === target);
+  const account = key ? accounts[key] : undefined;
   if (!account || typeof account !== "object") return null;
   const serverUrl = typeof account.serverUrl === "string" ? account.serverUrl : "";
   const auth = account.auth;
@@ -246,6 +250,22 @@ export function ensureAgentForBot(accountId: string): {
   } catch {
     return { agentId: "main", created: false, fallback: true };
   }
+}
+
+export function isAgentBound(agentId: string): boolean {
+  const cfg = readConfig() as Record<string, any>;
+  const bindings = cfg?.bindings;
+  if (!Array.isArray(bindings)) return false;
+  return bindings.some(
+    (b: any) =>
+      b?.match?.channel === "rocketchat" &&
+      typeof b.agentId === "string" &&
+      normalizeAgentId(b.agentId) === normalizeAgentId(agentId),
+  );
+}
+
+function normalizeAgentId(id: string): string {
+  return id.trim().toLowerCase();
 }
 
 export function addBinding(opts: {

@@ -14,7 +14,7 @@ import {
   inviteToGroup,
   getGroupByName,
 } from "./admin-api.js";
-import { updateConfig, readAccount, readAgentsList, addBinding, ensureAgentForBot } from "./config-updater.js";
+import { updateConfig, readAccount, readAgentsList, addBinding, ensureAgentForBot, isAgentBound } from "./config-updater.js";
 import { saveAdmin, loadAdmin, saveBotCredentials, loadBotCredentials } from "./credentials.js";
 import {
   color,
@@ -313,7 +313,39 @@ export async function runSetup(): Promise<void> {
     return;
   }
 
-  const agentResult = ensureAgentForBot(ACCOUNT_ID);
+  const dedicatedId = `rc-${ACCOUNT_ID}`;
+  const mainAlreadyBound = isAgentBound("main");
+
+  const agentChoices: Array<{ value: string; label: string; hint?: string }> = [];
+  if (!mainAlreadyBound) {
+    agentChoices.push({
+      value: "main",
+      label: "main (shared default agent)",
+      hint: "Recommended for the first bot",
+    });
+  }
+  agentChoices.push({
+    value: dedicatedId,
+    label: `${dedicatedId} (dedicated agent, auto-created)`,
+    hint: mainAlreadyBound ? "Recommended — isolates memory" : "Isolates memory per bot",
+  });
+
+  let chosenAgent: string;
+  if (agentChoices.length === 1) {
+    chosenAgent = agentChoices[0]!.value;
+  } else {
+    chosenAgent =
+      (await promptSelect({
+        message: `Which agent should @${ACCOUNT_ID} use?`,
+        options: agentChoices,
+        initialValue: "main",
+      })) ?? dedicatedId;
+  }
+
+  const agentResult =
+    chosenAgent === "main"
+      ? { agentId: "main", created: false, fallback: false }
+      : ensureAgentForBot(ACCOUNT_ID);
 
   try {
     await withSpinner("Sending welcome DM", async () => {

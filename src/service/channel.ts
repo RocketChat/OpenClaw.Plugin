@@ -2,6 +2,9 @@ import type { InboundEvent } from "../types.js";
 import type { ChannelRuleOptions } from "../types.js";
 import { RocketChatClient } from "../client/rest.js";
 import type { RCLoginResult } from "../types.js";
+import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
+import { resolve } from "node:path";
+import { homedir } from "node:os";
 import {
   readAllAccounts,
   readBindingsForAccount,
@@ -122,10 +125,12 @@ export async function matchCommand(text: string, ctx: CommandContext): Promise<C
       return { action: "openclaw-command", command: `/new${argStr ? " " + argStr : ""}` };
     case "model":
       return { action: "openclaw-command", command: `/model${argStr ? " " + argStr : ""}` };
-    case "agents":
-      return { action: "openclaw-command", command: `/agents${argStr ? " " + argStr : ""}` };
-    case "agent":
-      return { action: "openclaw-command", command: `/agent${argStr ? " " + argStr : ""}` };
+    case "tools":
+      return { action: "openclaw-command", command: `/tools${argStr ? " " + argStr : ""}` };
+    case "skill":
+      return { action: "openclaw-command", command: `/skill${argStr ? " " + argStr : ""}` };
+    case "skills":
+      return { action: "reply", replyText: runSkills() };
     case "think":
       return { action: "openclaw-command", command: `/think${argStr ? " " + argStr : ""}` };
     case "abort":
@@ -143,39 +148,65 @@ export async function matchCommand(text: string, ctx: CommandContext): Promise<C
 }
 
 function buildHelpText(): string {
-  return [
-    "**OpenClaw commands**",
-    "",
-    "**Plugin commands:**",
-    "- `!help` - show this message",
-    "- `!status` - server/bot/agent status",
-    "- `!bots` - list bot accounts and their agent bindings",
-    "- `!groups` - list groups this bot is in",
-    "- `!access` - who can use this bot and where",
-    "- `!add-bot <username>` - create a new bot (comes online + DMs you, no restart)",
-    "- `!remove-bot <username>` - delete a bot account (server user + config)",
-    "- `!add-group <group> [<bot>]` - invite a bot into a group/channel (defaults to this bot)",
-    "- `!lend <group> <user>` - grant a user access to this bot in a group",
-    "- `!revoke <group> <user>` - remove a user's access to this bot in a group",
-    "- `!bindings` - how to manage agents/bindings via OpenClaw CLI (official docs)",
-    "",
-    "**Conversation context:**",
-    "- `!compact` - compress old messages to free context space",
-    "- `!clear` - clear messages, keep memory",
-    "- `!reset` - full reset (messages + memory)",
-    "- `!new [model]` - fresh start, optionally switch model",
-    "",
-    "**Model & Agent:**",
-    "- `!model [name|number]` - list or switch models",
-    "- `!agents` - list available agents",
-    "- `!agent <id>` - switch to a specific agent",
-    "",
-    "**Behavior:**",
-    "- `!think <level>` - set reasoning depth (off/minimal/low/medium/high)",
-    "- `!abort` - stop current AI response",
-    "- `!reasoning <on/off>` - show reasoning as separate message",
-    "- `!verbose <on/off>` - show debug/tool call details",
-  ].join("\n");
+  const groups: Array<[string, Array<[string, string]>]> = [
+    [
+      "Bot",
+      [
+        ["help", "this menu"],
+        ["status", "server / bot / agent"],
+        ["bots", "bots + their agents"],
+        ["groups", "groups joined"],
+        ["access", "who can use"],
+        ["add-bot <user>", "create a bot"],
+        ["remove-bot <user>", "delete a bot"],
+        ["add-group <group> [bot]", "invite bot to group"],
+        ["lend <group> <user>", "grant access"],
+        ["revoke <group> <user>", "revoke access"],
+        ["bindings", "agent docs"],
+      ],
+    ],
+    [
+      "Context",
+      [
+        ["compact", "compress history"],
+        ["clear", "clear, keep memory"],
+        ["reset", "wipe all"],
+        ["new [model]", "fresh start"],
+      ],
+    ],
+    [
+      "Model",
+      [
+        ["model [name|#]", "list or switch"],
+      ],
+    ],
+    [
+      "Behavior",
+      [
+        ["think <level>", "depth: off..high"],
+        ["abort", "stop reply"],
+        ["reasoning on/off", "show reasoning"],
+        ["verbose on/off", "debug details"],
+      ],
+    ],
+    [
+      "Tools & Skills",
+      [
+        ["tools", "list agent tools"],
+        ["skills", "installed skills"],
+        ["skill <name>", "run a skill"],
+      ],
+    ],
+  ];
+
+  const lines: string[] = ["Commands"];
+  for (const [title, cmds] of groups) {
+    lines.push("", `**${title}**`);
+    for (const [cmd, desc] of cmds) {
+      lines.push(`\`!${cmd}\` ${desc}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 function buildBindingsHelpText(): string {
@@ -226,6 +257,56 @@ function runBots(): string {
   }
 
   return ["**Bot accounts**", ...lines].join("\n");
+}
+
+function parseSkillFrontmatter(content: string): { name?: string; description?: string } {
+  const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
+  if (!fmMatch) return {};
+  const fm = fmMatch[1]!;
+  const result: { name?: string; description?: string } = {};
+  const nameLine = fm.match(/^name:\s*(.+)$/m);
+  if (nameLine) result.name = nameLine[1]!.trim().replace(/^["']|["']$/g, "");
+  const descLine = fm.match(/^description:\s*(.+)$/m);
+  if (descLine) result.description = descLine[1]!.trim().replace(/^["']|["']$/g, "");
+  return result;
+}
+
+function runSkills(): string {
+  const skillsDir = resolve(homedir(), ".openclaw", "skills");
+  if (!existsSync(skillsDir)) {
+    return "No skills installed (expected at ~/.openclaw/skills).";
+  }
+  const entries = readdirSync(skillsDir).filter((name) => {
+    const full = resolve(skillsDir, name);
+    try {
+      return statSync(full).isDirectory() || statSync(full).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  });
+  const skills: Array<{ name: string; description: string }> = [];
+  for (const name of entries) {
+    const skillMd = resolve(skillsDir, name, "SKILL.md");
+    if (!existsSync(skillMd)) continue;
+    let content = "";
+    try {
+      content = readFileSync(skillMd, "utf8");
+    } catch {
+      continue;
+    }
+    const fm = parseSkillFrontmatter(content);
+    if (!fm.name) continue;
+    skills.push({ name: fm.name, description: fm.description ?? "" });
+  }
+  if (skills.length === 0) {
+    return "No skills installed (expected at ~/.openclaw/skills).";
+  }
+  const lines = ["**Skills**"];
+  for (const s of skills) {
+    lines.push(`- \`!skill ${s.name}\`${s.description ? ` - ${s.description}` : ""}`);
+  }
+  lines.push("", "Run a skill: `!skill <name>`");
+  return lines.join("\n");
 }
 
 async function runGroups(ctx: CommandContext): Promise<string> {

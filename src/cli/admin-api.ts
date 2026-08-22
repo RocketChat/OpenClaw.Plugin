@@ -142,7 +142,7 @@ export async function createBotUser(
       name: opts.name,
       password: opts.password,
       email: opts.email,
-      roles: ["bot", "user"],
+      roles: ["bot"],
       verified: true,
       requirePasswordChange: false,
       sendWelcomeEmail: false,

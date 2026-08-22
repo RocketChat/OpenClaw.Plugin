@@ -24,7 +24,7 @@ import type {
   ReplyDeliverInfo,
 } from "../types.js";
 
-const MAX_MESSAGE_LENGTH = 10_000;
+const MAX_MESSAGE_LENGTH = 4000;
 const MAX_ATTACHMENTS = 5;
 
 export type ClientEntry = { client: RocketChatClient; generation: number; wakeup: () => void };
@@ -59,24 +59,28 @@ async function handleMessage(
   ddp: RocketChatDdpConnection | null,
   accountId: string,
   identityUsername: string,
+  isCommand: boolean,
+  commandText: string | null,
 ): Promise<void> {
   const replyTmid = event.tmid ?? undefined;
   const channelRuntime = ctx.channelRuntime;
   if (!channelRuntime) return;
 
-  const emoji = PROCESSING_EMOJIS[Math.floor(Math.random() * PROCESSING_EMOJIS.length)]!;
-  await (
-    ddp
-      ?.reactToMessage(event.messageId, emoji)
-      .catch(() => client.reactToMessage(event.messageId, emoji)) ??
-    client.reactToMessage(event.messageId, emoji)
-  ).catch((err) =>
-    logger.error(
-      `[rocketchat:${accountId}] reaction failed: ${err instanceof Error ? err.message : String(err)}`,
-    ),
-  );
+  if (!isCommand) {
+    const emoji = PROCESSING_EMOJIS[Math.floor(Math.random() * PROCESSING_EMOJIS.length)]!;
+    await (
+      ddp
+        ?.reactToMessage(event.messageId, emoji)
+        .catch(() => client.reactToMessage(event.messageId, emoji)) ??
+      client.reactToMessage(event.messageId, emoji)
+    ).catch((err) =>
+      logger.error(
+        `[rocketchat:${accountId}] reaction failed: ${err instanceof Error ? err.message : String(err)}`,
+      ),
+    );
 
-  await ddp?.sendTyping(event.roomId, true).catch(() => {});
+    await ddp?.sendTyping(event.roomId, true).catch(() => {});
+  }
 
   const groupHistory =
     event.roomType === "direct" ? [] : getAndClearGroupHistory(accountId, event.roomId);
@@ -90,7 +94,7 @@ async function handleMessage(
     channelRuntime,
     client,
     deliver: (payload, info) =>
-      sendReply(client, ddp, event.roomId, event.messageId, replyTmid, accountId, payload, info),
+      sendReply(client, ddp, event.roomId, event.messageId, replyTmid, accountId, payload, info, isCommand, commandText),
     onRecordError: (error) => {
       logger.error(
         `[rocketchat:${accountId}] failed to record inbound session: ${error instanceof Error ? error.message : String(error)}`,
@@ -106,6 +110,133 @@ async function handleMessage(
   await ddp?.sendTyping(event.roomId, false).catch(() => {});
 }
 
+const OPENCLAW_CMD_NAMES = [
+  "acp", "activation", "agents", "approve", "btw", "commands", "compact", "config",
+  "context", "debug", "diagnostics", "elevated", "exec", "export-session",
+  "export-trajectory", "fast", "focus", "goal", "help", "learn", "login", "mcp",
+  "models", "model", "name", "new", "plugins", "queue", "reasoning", "reset",
+  "restart", "send", "session", "skill", "status", "steer", "stop", "subagents",
+  "tasks", "think", "tools", "trace", "tts", "unfocus", "usage", "verbose", "whoami",
+].join("|");
+const OPENCLAW_CMD_RE = new RegExp(`(?<![\\w/])/(${OPENCLAW_CMD_NAMES})(?![\\w-])`, "g");
+
+function shortModelId(id: string): string {
+  const slash = id.lastIndexOf("/");
+  return slash >= 0 ? id.slice(slash + 1) : id;
+}
+
+function wrapToolLine(line: string, width = 72): string {
+  const parts = line.split(", ");
+  const rows: string[] = [];
+  let cur = "";
+  for (const part of parts) {
+    if (cur && cur.length + 2 + part.length > width) {
+      rows.push(cur);
+      cur = part;
+    } else {
+      cur = cur ? `${cur}, ${part}` : part;
+    }
+  }
+  if (cur) rows.push(cur);
+  return rows.join("\n");
+}
+
+function cleanToolDesc(s: string): string {
+  return s
+    .replace(/\*\*\*([^*]+?)\*\*\*/g, (_, c) => "`" + String(c).trim() + "`")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+function reformatTools(text: string): string {
+  const lines = text.split("\n");
+  // Verbose mode: individual "Name - description" entries (not a single comma list).
+  const isVerbose = lines.some(
+    (l) => /^[\w\s()./:&-]{1,40}?\s-\s/.test(l.trim()) && !/^Use /i.test(l.trim()),
+  );
+  if (!isVerbose) {
+    const out: string[] = [];
+    for (let i = 0; i < lines.length; i++) {
+      const trimmed = lines[i]!.trim();
+      if (/^Profile:/i.test(trimmed)) continue;
+      if (/^Available tools$/i.test(trimmed)) {
+        out.push("**Tools**");
+        continue;
+      }
+      if (/tools$/i.test(trimmed) && !/^Use /i.test(trimmed)) {
+        const next = lines[i + 1]?.trim() ?? "";
+        const count = next.includes(", ") ? next.split(", ").length : next ? 1 : 0;
+        out.push("", `**${trimmed} (${count})**`);
+        if (next) {
+          out.push(wrapToolLine(next));
+          i++;
+        }
+        continue;
+      }
+      if (trimmed.includes(", ")) {
+        out.push(wrapToolLine(trimmed));
+        continue;
+      }
+      out.push(lines[i]!);
+    }
+    return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  }
+
+  // Verbose: one clean block per tool.
+  const out: string[] = [];
+  let cur: { name: string; desc: string } | null = null;
+  const flush = () => {
+    if (cur) {
+      out.push("", `**${cur.name}** — ${cur.desc}`);
+      cur = null;
+    }
+  };
+  for (const raw of lines) {
+    const trimmed = raw.trim();
+    if (/^Profile:/i.test(trimmed)) continue;
+    if (/^Available tools$/i.test(trimmed)) {
+      flush();
+      out.push("**Tools**");
+      continue;
+    }
+    if (/^What this agent can use right now:/i.test(trimmed)) continue;
+    if (/^(?:Built-in|Connected)\s+tools\b/i.test(trimmed)) {
+      flush();
+      out.push("", `**${trimmed.replace(/^\*\*|\*\*$/g, "")}**`);
+      continue;
+    }
+    if (/^Tool availability depends/i.test(trimmed)) {
+      flush();
+      out.push("", `_${trimmed}_`);
+      continue;
+    }
+    const m = trimmed.match(/^([\w\s()./:&-]{1,40}?)\s-\s(.+)$/);
+    if (m) {
+      flush();
+      cur = { name: m[1]!.trim(), desc: cleanToolDesc(m[2]!.trim()) };
+    } else if (cur) {
+      cur.desc += " " + cleanToolDesc(trimmed);
+    } else {
+      out.push(trimmed);
+    }
+  }
+  flush();
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function reformatCommandReply(command: string | null, text: string): string {
+  if (!command || !text) return text;
+  let out = text.replace(OPENCLAW_CMD_RE, "!$1");
+  // Tidy the model card: show a short model id on the Current line.
+  if (command.startsWith("/model")) {
+    out = out.replace(/^Current:\s*(\S+)/m, (_m, id: string) => `Current: ${shortModelId(id)}`);
+  }
+  if (command.startsWith("/tools")) {
+    out = reformatTools(out);
+  }
+  return out;
+}
+
 async function sendReply(
   client: RocketChatClient,
   ddp: RocketChatDdpConnection | null,
@@ -115,36 +246,48 @@ async function sendReply(
   accountId: string,
   payload: OutboundReplyPayload,
   info: ReplyDeliverInfo,
+  isCommand: boolean,
+  commandText: string | null,
 ): Promise<void> {
   if (info.kind !== "final") return;
 
-  await (
-    ddp
-      ?.reactToMessage(messageId, ":white_check_mark:")
-      .catch(() => client.reactToMessage(messageId, ":white_check_mark:")) ??
-    client.reactToMessage(messageId, ":white_check_mark:")
-  ).catch((err) =>
-    logger.error(
-      `[rocketchat:${accountId}] reaction failed: ${err instanceof Error ? err.message : String(err)}`,
-    ),
-  );
+  const text = reformatCommandReply(commandText, payload.text ?? "");
 
-  await ddp?.sendTyping(roomId, false).catch(() => {});
+  if (!isCommand) {
+    await (
+      ddp
+        ?.reactToMessage(messageId, ":white_check_mark:")
+        .catch(() => client.reactToMessage(messageId, ":white_check_mark:")) ??
+      client.reactToMessage(messageId, ":white_check_mark:")
+    ).catch((err) =>
+      logger.error(
+        `[rocketchat:${accountId}] reaction failed: ${err instanceof Error ? err.message : String(err)}`,
+      ),
+    );
+
+    await ddp?.sendTyping(roomId, false).catch(() => {});
+  }
 
   const sendMsg = client.postMessage.bind(client);
   const tmidOpt = replyTmid ? { tmid: replyTmid } : undefined;
 
-  if (payload.attachmentPath) {
-    try {
-      await client.uploadAttachment(roomId, payload.attachmentPath, payload.text, tmidOpt);
-    } catch (err) {
-      logger.error(
-        `[rocketchat:${accountId}] upload failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      await sendMessageChunks(sendMsg, roomId, payload.text ?? "", tmidOpt);
+  try {
+    if (payload.attachmentPath) {
+      try {
+        await client.uploadAttachment(roomId, payload.attachmentPath, text, tmidOpt);
+      } catch (err) {
+        logger.error(
+          `[rocketchat:${accountId}] upload failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        await sendMessageChunks(sendMsg, roomId, text, tmidOpt);
+      }
+    } else {
+      await sendMessageChunks(sendMsg, roomId, text, tmidOpt);
     }
-  } else {
-    await sendMessageChunks(sendMsg, roomId, payload.text ?? "", tmidOpt);
+  } catch (err) {
+    logger.error(
+      `[rocketchat:${accountId}] sendReply failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 
@@ -345,7 +488,7 @@ async function startDdpGateway(
       if (processingMessages.has(msg._id)) return;
       processingMessages.add(msg._id);
       try {
-        await handleMessage(ctx, event, client, connection, accountId, identity.username);
+        await handleMessage(ctx, event, client, connection, accountId, identity.username, cmdResult.action === "openclaw-command", cmdResult.action === "openclaw-command" ? event.text : null);
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         logger.error(
