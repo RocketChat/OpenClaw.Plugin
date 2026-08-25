@@ -1,4 +1,11 @@
-import type { InboundEvent, OpenClawConfigLike, OutboundReplyPayload, ReplyDeliverInfo, ChannelRuntimeLike, InboundAttachment } from "../types.js";
+import type {
+  InboundEvent,
+  OpenClawConfigLike,
+  OutboundReplyPayload,
+  ReplyDeliverInfo,
+  ChannelRuntimeLike,
+  InboundAttachment,
+} from "../types.js";
 import type { RocketChatClient } from "../client/rest.js";
 import type { GroupHistoryEntry } from "./group-history.js";
 
@@ -24,14 +31,19 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     },
   });
 
-  const storePath = params.channelRuntime.session.resolveStorePath(
-    params.cfg.session?.store,
-    { agentId: route.agentId },
-  );
+  // Per-bot session isolation: multiple bots bound to the same agent
+  // get separate conversation histories by including the bot accountId in the key.
+  // accountId is the stable routing key (one bot = one agent), so this guarantees
+  // two bots sharing an agent (e.g. fallback to main) do not bleed memory into each other.
+  const botAwareSessionKey = `${route.sessionKey}:${params.accountId}`;
+
+  const storePath = params.channelRuntime.session.resolveStorePath(params.cfg.session?.store, {
+    agentId: route.agentId,
+  });
 
   const previousTimestamp = params.channelRuntime.session.readSessionUpdatedAt({
     storePath,
-    sessionKey: route.sessionKey,
+    sessionKey: botAwareSessionKey,
   });
 
   const envelopeOptions = params.channelRuntime.reply.resolveEnvelopeFormatOptions(params.cfg);
@@ -49,6 +61,7 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     body: bodyForAgent,
   });
 
+  const isCommand = params.event.text.startsWith("/");
   const ctxPayload = params.channelRuntime.reply.finalizeInboundContext({
     Body: body,
     BodyForAgent: bodyForAgent,
@@ -56,13 +69,14 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     CommandBody: params.event.text,
     From: buildSenderAddress(params.event),
     To: to,
-    SessionKey: route.sessionKey,
+    SessionKey: botAwareSessionKey,
     AccountId: route.accountId ?? params.accountId,
     ChatType: params.event.roomType,
     ConversationLabel: buildConversationLabel(params.event),
     GroupSubject: params.event.roomType === "direct" ? undefined : params.event.roomId,
     SenderId: params.event.senderId,
-    WasMentioned: params.event.roomType !== "direct" && params.event.mentions.includes(params.identityUsername),
+    WasMentioned:
+      params.event.roomType !== "direct" && params.event.mentions.includes(params.identityUsername),
     Provider: "rocketchat",
     Surface: "rocketchat",
     MessageSid: params.event.messageId,
@@ -70,15 +84,16 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     Timestamp: timestamp,
     OriginatingChannel: "rocketchat",
     OriginatingTo: to,
+    ...(isCommand ? { CommandSource: "text" as const, CommandAuthorized: true } : {}),
     ...(await buildMediaContext(params.event.attachments, params.client)),
   });
 
   await params.channelRuntime.session.recordInboundSession({
     storePath,
-    sessionKey: ctxPayload.SessionKey ?? route.sessionKey,
+    sessionKey: ctxPayload.SessionKey ?? botAwareSessionKey,
     ctx: ctxPayload,
     updateLastRoute: {
-      sessionKey: route.mainSessionKey ?? route.sessionKey,
+      sessionKey: route.mainSessionKey ?? botAwareSessionKey,
       channel: "rocketchat",
       to,
       accountId: route.accountId ?? params.accountId,
@@ -108,9 +123,12 @@ function normalizeOutboundReplyPayload(payload: unknown): OutboundReplyPayload {
   const text = typeof record.text === "string" ? record.text : undefined;
   const mediaUrl = typeof record.mediaUrl === "string" ? record.mediaUrl : undefined;
   const mediaUrls = Array.isArray(record.mediaUrls)
-    ? record.mediaUrls.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    ? record.mediaUrls.filter(
+        (value): value is string => typeof value === "string" && value.trim().length > 0,
+      )
     : undefined;
-  const attachmentPath = typeof record.attachmentPath === "string" ? record.attachmentPath : undefined;
+  const attachmentPath =
+    typeof record.attachmentPath === "string" ? record.attachmentPath : undefined;
   const replyToId = typeof record.replyToId === "string" ? record.replyToId : undefined;
 
   return {
@@ -147,7 +165,10 @@ async function buildMediaContext(
     attachments.map(async (attachment) => {
       if (attachment.source === "rocketchat-file" && attachment.url && client) {
         try {
-          const filePath = await client.downloadAttachmentToTempFile(attachment.url, attachment.fileName ? { fileName: attachment.fileName } : undefined);
+          const filePath = await client.downloadAttachmentToTempFile(
+            attachment.url,
+            attachment.fileName ? { fileName: attachment.fileName } : undefined,
+          );
           return { kind: "path" as const, value: filePath, mimeType: attachment.mimeType };
         } catch {
           return null;

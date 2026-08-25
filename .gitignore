@@ -3,7 +3,6 @@ package-lock.json
 .vscode
 node_modules
 dist
-*.txt
-*.mjs
-AGENTS.md
+.pnpm-store/
 ROADMAP.md
+/scripts

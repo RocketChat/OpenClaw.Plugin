@@ -1,21 +1,24 @@
-import { defineChannelPluginEntry } from "openclaw/plugin-sdk/channel-core";
-import type { OpenClawPluginApi, OpenClawPluginDefinition } from "openclaw/plugin-sdk/core";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
 import { rocketchatPlugin, startGateway } from "./plugin.js";
 
 export { startGateway } from "./plugin.js";
 
-const _entry = defineChannelPluginEntry({
-  id: "rocketchat",
-  name: "Rocket.Chat",
-  description: "Rocket.Chat channel plugin with REST polling outbound/inbound",
-  plugin: rocketchatPlugin,
-  registerFull: (api: OpenClawPluginApi) => {
-    api.registerGatewayMethod("rocketchat.gateway.startAccount", (ctx) => {
-      return startGateway(ctx as unknown as Parameters<typeof startGateway>[0]);
-    });
-  },
-});
+export default function register(api: OpenClawPluginApi): void {
+  api.registerChannel({ plugin: rocketchatPlugin });
 
-const entry: OpenClawPluginDefinition & { channelPlugin: typeof rocketchatPlugin } = _entry;
+  api.registerCli(
+    ({ program }: { program: any }) => {
+      const rc = program.command("rocketchat").description("Rocket.Chat channel plugin commands");
 
-export default entry;
+      rc.command("setup")
+        .description("Interactive setup wizard - connect Rocket.Chat to OpenClaw")
+        .action(async () => {
+          const { runSetup } = await import("./cli/setup.js");
+          await runSetup();
+        });
+    },
+    {
+      commands: ["rocketchat"],
+    },
+  );
+}

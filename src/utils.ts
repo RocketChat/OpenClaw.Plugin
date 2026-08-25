@@ -11,7 +11,11 @@ export function resolveOpenClawDir(): string {
 }
 
 export function resolveUrl(url: string, base?: string): string {
-  try { return new URL(url).toString(); } catch { /* relative */ }
+  try {
+    return new URL(url).toString();
+  } catch {
+    /* relative */
+  }
   if (!base) return url;
   try {
     return new URL(url, base.endsWith("/") ? base : base + "/").toString();
@@ -34,3 +38,16 @@ export function getExt(name: string | undefined): string | undefined {
   if (dot <= 0 || dot === part.length - 1) return undefined;
   return part.slice(dot + 1);
 }
+
+export function extractQuotedMessageId(link: string): string | undefined {
+  try {
+    const url = new URL(link);
+    const msg = url.searchParams.get("msg");
+    return msg && msg.length > 0 ? msg : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Sentinel roomId used for grants that permit direct-message (DM) access only. */
+export const DM_SCOPE = "dm";

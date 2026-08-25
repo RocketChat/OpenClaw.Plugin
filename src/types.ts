@@ -190,24 +190,9 @@ export type FailedMessageRecord = {
   reason: string;
 };
 
-export type GatewayApi = {
-  registerGatewayMethod(name: string, handler: (ctx: unknown) => Promise<void>): void;
-  registerChannel?(args: { plugin: unknown }): void;
-};
-
 export type AuthCredentials =
   | { mode: "token"; userId: string; accessToken: string }
   | { mode: "password"; username: string; password: string };
-
-export type AccountCredentials = {
-  accountId: string;
-  auth: AuthCredentials;
-  bot?: {
-    username: string;
-    userId: string;
-  };
-  createdAt: string;
-};
 
 export type RCLoginResult = {
   userId: string;
@@ -236,4 +221,3 @@ export type AttachmentRecord = {
   filename?: string;
   size?: number;
 };
-

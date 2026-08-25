@@ -1,23 +1,6 @@
-import { resolveUrl, getExt } from "../utils.js";
+import { resolveUrl } from "../utils.js";
 import type { InboundAttachment, InboundAttachmentKind, AttachmentRecord } from "../types.js";
-
-const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "tiff", "tif"]);
-const VIDEO_EXTENSIONS = new Set(["mp4", "mov", "mkv", "webm", "avi", "m4v"]);
-const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "ogg", "oga", "opus", "wav", "flac", "aac", "amr", "weba"]);
-const DOCUMENT_EXTENSIONS = new Set(["pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "txt", "md", "csv", "json"]);
-const DOCUMENT_MIME_TYPES = new Set([
-  "application/pdf",
-  "application/msword",
-  "application/vnd.ms-excel",
-  "application/vnd.ms-powerpoint",
-  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  "application/json",
-  "text/csv",
-  "text/markdown",
-  "text/plain",
-]);
+import { mediaKindFromMime, mimeTypeFromFilePath } from "openclaw/plugin-sdk/media-mime";
 
 export function getMessageAttachmentInputs(message: {
   attachments?: unknown[];
@@ -45,11 +28,10 @@ export function getMessageAttachmentInputs(message: {
   const paired = new Set<number>();
 
   for (const fileRec of fileRecords) {
-    const matchIdx = attachmentRecords.findIndex((att, i) =>
-      !paired.has(i) && (
-        (fileRec._id && att._id && fileRec._id === att._id) ||
-        (!hasId(att) && hasUrl(att))
-      ),
+    const matchIdx = attachmentRecords.findIndex(
+      (att, i) =>
+        !paired.has(i) &&
+        ((fileRec._id && att._id && fileRec._id === att._id) || (!hasId(att) && hasUrl(att))),
     );
     if (matchIdx !== -1) {
       paired.add(matchIdx);
@@ -96,7 +78,9 @@ function toAttachment(input: unknown, options?: { serverUrl?: string }): Inbound
 }
 
 function asRecord(input: unknown): AttachmentRecord | null {
-  return input && typeof input === "object" && !Array.isArray(input) ? input as AttachmentRecord : null;
+  return input && typeof input === "object" && !Array.isArray(input)
+    ? (input as AttachmentRecord)
+    : null;
 }
 
 function toRecords(inputs: unknown[]): AttachmentRecord[] {
@@ -108,8 +92,17 @@ function getMime(record: AttachmentRecord | null): string | undefined {
   return typeof v === "string" && v.trim().length > 0 ? v.trim().toLowerCase() : undefined;
 }
 
-function getUrl(record: AttachmentRecord | null, serverUrl: string | undefined): string | undefined {
-  const candidates = [record?.url, record?.title_link, record?.image_url, record?.video_url, record?.audio_url];
+function getUrl(
+  record: AttachmentRecord | null,
+  serverUrl: string | undefined,
+): string | undefined {
+  const candidates = [
+    record?.url,
+    record?.title_link,
+    record?.image_url,
+    record?.video_url,
+    record?.audio_url,
+  ];
   const raw = candidates.find((v): v is string => typeof v === "string" && v.length > 0);
   return raw ? resolveUrl(raw, serverUrl) : undefined;
 }
@@ -123,21 +116,16 @@ function getFileName(record: AttachmentRecord | null, url: string | undefined): 
   try {
     const seg = new URL(url).pathname.split("/").filter(Boolean).at(-1);
     return seg ? decodeURIComponent(seg) : undefined;
-  } catch { return undefined; }
+  } catch {
+    return undefined;
+  }
 }
 
-function classify(mimeType: string | undefined, fileName: string | undefined): InboundAttachmentKind {
-  if (mimeType?.startsWith("image/")) return "image";
-  if (mimeType?.startsWith("audio/")) return "audio";
-  if (mimeType?.startsWith("video/")) return "video";
-  if (mimeType?.startsWith("text/") || (mimeType && DOCUMENT_MIME_TYPES.has(mimeType))) return "document";
-  const ext = getExt(fileName);
-  if (!ext) return "unknown";
-  if (IMAGE_EXTENSIONS.has(ext)) return "image";
-  if (AUDIO_EXTENSIONS.has(ext)) return "audio";
-  if (VIDEO_EXTENSIONS.has(ext)) return "video";
-  if (DOCUMENT_EXTENSIONS.has(ext)) return "document";
-  return "unknown";
+function classify(
+  mimeType: string | undefined,
+  fileName: string | undefined,
+): InboundAttachmentKind {
+  const mime = mimeType ?? (fileName ? mimeTypeFromFilePath(fileName) : undefined);
+  const kind = mime ? mediaKindFromMime(mime) : undefined;
+  return kind ?? "unknown";
 }
-
-

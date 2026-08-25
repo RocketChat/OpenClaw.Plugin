@@ -1,8 +1,14 @@
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { randomUUID } from "node:crypto";
-import { resolveOpenClawDir, resolveUrl, getExt, getErrorMessage } from "../utils.js";
-import ipaddr from "ipaddr.js";
+import {
+  extractQuotedMessageId,
+  resolveOpenClawDir,
+  resolveUrl,
+  getExt,
+  getErrorMessage,
+} from "../utils.js";
+import { isPrivateOrLoopbackHost } from "openclaw/plugin-sdk/ssrf-runtime";
 
 const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
 const ALLOWED_DOWNLOAD_MIME_PREFIXES = ["image/", "audio/", "video/", "application/"];
@@ -11,7 +17,6 @@ import type {
   PluginAccountConfig,
   RocketChatIdentity,
   RocketChatSubscriptionRecord,
-  RocketChatMessageRecord,
   RocketChatClientOptions,
   JsonObject,
 } from "../types.js";
@@ -67,7 +72,7 @@ export class RocketChatClient {
     if (!response.ok) {
       throw new RocketChatClientError(`login failed: ${response.statusText}`);
     }
-    const payload = await response.json() as JsonObject;
+    const payload = (await response.json()) as JsonObject;
     const data = asObject(payload.data);
     this.resolvedUserId = getString(data, "userId");
     this.resolvedAuthToken = getString(data, "authToken");
@@ -76,7 +81,9 @@ export class RocketChatClient {
   async getIdentity(): Promise<RocketChatIdentity> {
     if (this.identity) return this.identity;
     await this.ensureInitialized();
-    const payload = await this.requestJson(new URL("/api/v1/me", this.serverUrl), { method: "GET" });
+    const payload = await this.requestJson(new URL("/api/v1/me", this.serverUrl), {
+      method: "GET",
+    });
     const user = asObject(payload.user ?? payload.me ?? payload);
     this.identity = {
       userId: this.resolvedUserId!,
@@ -95,6 +102,21 @@ export class RocketChatClient {
   }
 
   async postMessage(roomId: string, text: string, options?: { tmid?: string }): Promise<string> {
+    try {
+      return await this.postMessageRaw(roomId, text, options);
+    } catch (err) {
+      if (err instanceof RocketChatClientError && err.message.includes("/message/md")) {
+        return await this.postMessageRaw(roomId, stripMarkdown(text), options);
+      }
+      throw err;
+    }
+  }
+
+  private async postMessageRaw(
+    roomId: string,
+    text: string,
+    options?: { tmid?: string },
+  ): Promise<string> {
     const body: Record<string, string> = { roomId, text };
     if (options?.tmid) body.tmid = options.tmid;
     const payload = await this.requestJson(new URL("/api/v1/chat.postMessage", this.serverUrl), {
@@ -119,18 +141,22 @@ export class RocketChatClient {
     );
     const message = asObject(payload.message);
     const text = typeof message.msg === "string" && message.msg.length > 0 ? message.msg : null;
-    const attachments = Array.isArray(message.attachments) ? message.attachments : [];
-    let quotedId: string | null = null;
-    for (const att of attachments) {
-      const record = att as { message_link?: string };
-      const link = typeof record.message_link === "string" ? record.message_link : "";
-      const match = link.match(/[?&]msg=([A-Za-z0-9]+)/);
-      if (match) {
-        quotedId = match[1]!;
-        break;
-      }
-    }
+    const link = (Array.isArray(message.attachments) ? message.attachments : [])
+      .map((att) => (att as { message_link?: string }).message_link)
+      .find((l): l is string => typeof l === "string" && l.length > 0);
+    const quotedId = link ? (extractQuotedMessageId(link) ?? null) : null;
     return { text, quotedId };
+  }
+
+  /** Resolve a room's type (`d`/`p`/`c`) on demand, used for rooms created after connect. */
+  async getRoomType(roomId: string): Promise<string | undefined> {
+    const payload = await this.requestJson(
+      new URL(`/api/v1/rooms.info?roomId=${encodeURIComponent(roomId)}`, this.serverUrl),
+      { method: "GET" },
+    );
+    const room = asObject(payload.room);
+    const t = room.t;
+    return typeof t === "string" && t.length > 0 ? t : undefined;
   }
 
   async downloadAttachmentToTempFile(
@@ -140,7 +166,9 @@ export class RocketChatClient {
     await this.ensureInitialized();
     const requestUrl = resolveUrl(url, this.serverUrl);
     if (!isSafeExternalUrl(requestUrl, this.serverUrl)) {
-      throw new RocketChatClientError(`attachment download blocked: ${requestUrl} resolves to a private/internal address`);
+      throw new RocketChatClientError(
+        `attachment download blocked: ${requestUrl} resolves to a private/internal address`,
+      );
     }
     const response = await this.fetchFn(requestUrl, {
       method: "GET",
@@ -155,7 +183,10 @@ export class RocketChatClient {
     }
     const contentTypeHeader = response.headers.get("Content-Type");
     const rawContentType = (contentTypeHeader ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
-    if (!rawContentType || !ALLOWED_DOWNLOAD_MIME_PREFIXES.some((p) => rawContentType.startsWith(p))) {
+    if (
+      !rawContentType ||
+      !ALLOWED_DOWNLOAD_MIME_PREFIXES.some((p) => rawContentType.startsWith(p))
+    ) {
       throw new RocketChatClientError(
         `attachment download refused: unsupported content type "${contentTypeHeader ?? ""}"`,
       );
@@ -173,7 +204,10 @@ export class RocketChatClient {
     await mkdir(inboundDir, { recursive: true });
     const ext = getExt(options?.fileName ?? url ?? "attachment");
     const safeName = (options?.fileName ?? "attachment").replace(/[^a-zA-Z0-9._-]/g, "_");
-    const filePath = join(inboundDir, `${safeName}---${randomUUID().slice(0, 12)}${ext ? `.${ext}` : ""}`);
+    const filePath = join(
+      inboundDir,
+      `${safeName}---${randomUUID().slice(0, 12)}${ext ? `.${ext}` : ""}`,
+    );
     const bytes = Buffer.from(await response.arrayBuffer());
     if (bytes.length > MAX_DOWNLOAD_BYTES) {
       throw new RocketChatClientError(
@@ -190,13 +224,22 @@ export class RocketChatClient {
     text?: string,
     options?: { tmid?: string },
   ): Promise<string> {
-    await this.ensureInitialized();
-    const fileName = basename(filePath);
     const fileBytes = await readFile(filePath);
+    return this.uploadAttachmentFromBuffer(roomId, fileBytes, basename(filePath), text, options);
+  }
+
+  async uploadAttachmentFromBuffer(
+    roomId: string,
+    buffer: Buffer | Uint8Array,
+    fileName: string,
+    text?: string,
+    options?: { tmid?: string },
+  ): Promise<string> {
+    await this.ensureInitialized();
     const formData = new FormData();
     if (text?.trim()) formData.append("msg", text.trim());
     if (options?.tmid) formData.append("tmid", options.tmid);
-    formData.append("file", new Blob([fileBytes]), fileName);
+    formData.append("file", new Blob([buffer as never]), fileName);
     const uploadResponse = await this.fetchFn(
       new URL(`/api/v1/rooms.media/${encodeURIComponent(roomId)}`, this.serverUrl).toString(),
       {
@@ -252,7 +295,7 @@ export class RocketChatClient {
         Accept: "application/json",
         "X-User-Id": this.resolvedUserId!,
         "X-Auth-Token": this.resolvedAuthToken!,
-        ...(init.headers as Record<string, string> ?? {}),
+        ...((init.headers as Record<string, string>) ?? {}),
       },
     });
     return this.parseJsonResponse(response);
@@ -302,13 +345,7 @@ function isSafeExternalUrl(url: string, serverUrl: string): boolean {
 function isPrivateHostname(hostname: string): boolean {
   const lower = hostname.toLowerCase();
   if (lower === "localhost" || lower.endsWith(".local") || lower.endsWith(".internal")) return true;
-  const raw = lower.replace(/^\[|\]$/g, "");
-  try {
-    const addr = ipaddr.parse(raw);
-    return addr.range() !== "unicast";
-  } catch {
-    return false;
-  }
+  return isPrivateOrLoopbackHost(lower);
 }
 
 function asObject(value: unknown): JsonObject {
@@ -354,3 +391,26 @@ function getRetryAfterMs(response: Response, payload: JsonObject): number {
   return 30_000;
 }
 
+function stripMarkdown(text: string): string {
+  const separatorRe = /^[-:]+$/;
+  return text
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^>\s+/gm, "")
+    .replace(/^[-*+]\s+/gm, "• ")
+    .replace(/^\d+\.\s+/gm, "• ")
+    .replace(/```[\s\S]*?```/g, (m) => m.replace(/```/g, "").trim())
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/~~([^~]+)~~/g, "$1")
+    .replace(/^\|(.+)\|$/gm, (_m, inner: string) =>
+      inner
+        .split("|")
+        .map((c: string) => c.trim())
+        .filter((c: string) => c.length > 0 && !separatorRe.test(c))
+        .join(" | "),
+    )
+    .replace(/^---+$/gm, "")
+    .trim();
+}
