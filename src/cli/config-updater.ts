@@ -192,7 +192,7 @@ export function addAccount(opts: {
   serverUrl: string;
   auth: TokenAuth;
   mentionNames: string[];
-  transport?: { mode: "websocket"; maxConcurrent?: number };
+  transport?: { mode: "websocket" };
   owner?: string;
 }): void {
   const cfg = readConfig() as Record<string, any>;

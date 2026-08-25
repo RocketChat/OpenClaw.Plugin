@@ -1,4 +1,4 @@
-import { resolveOpenClawDir, extractQuotedMessageId } from "../utils.js";
+import { resolveOpenClawDir, extractQuotedMessageId, DM_SCOPE } from "../utils.js";
 import { RocketChatClient } from "../client/rest.js";
 import { parsePluginConfig } from "../config/schema.js";
 import { CheckpointStore } from "../config/store.js";
@@ -27,8 +27,8 @@ import type {
 const MAX_MESSAGE_LENGTH = 4000;
 const MAX_ATTACHMENTS = 5;
 
-export type ClientEntry = { client: RocketChatClient; generation: number; wakeup: () => void };
-export const activeClients = new Map<string, ClientEntry>();
+import { activeClients, connectionStatus, type ClientEntry } from "./runtime-state.js";
+export { activeClients, type ClientEntry } from "./runtime-state.js";
 let nextGeneration = 0;
 
 let logger: { info: (msg: string) => void; error: (msg: string) => void } = {
@@ -109,9 +109,6 @@ async function handleMessage(
 
   await ddp?.sendTyping(event.roomId, false).catch(() => {});
 }
-
-/** Sentinel roomId used for grants that permit direct-message (DM) access only. */
-const DM_SCOPE = "dm";
 
 const OPENCLAW_CMD_NAMES = [
   "acp", "activation", "agents", "approve", "btw", "commands", "compact", "config",
@@ -398,6 +395,7 @@ async function startDdpGateway(
     username: identity.username,
     reconnectDelayMs,
     onStatus: (status) => {
+      connectionStatus.set(accountId, status);
       logger.info(`[rocketchat:${accountId}] ddp status: ${status}`);
     },
     onError: (error) => logger.error(`[rocketchat:${accountId}] ddp error: ${error.message}`),
@@ -405,7 +403,21 @@ async function startDdpGateway(
       if (shouldSkipMessage(msg, identity.userId, seenIds)) return;
       if (processingMessages.has(msg._id)) return;
 
-      const sub: RocketChatSubscriptionRecord = { rid: msg.rid, t: roomTypes.get(msg.rid) ?? "c" };
+      // Room types are snapshotted once at connect; resolve unknown rooms on demand so
+      // DMs (and other rooms) created after connect are handled live without a restart.
+      let roomType = roomTypes.get(msg.rid);
+      if (!roomType && client) {
+        try {
+          const resolved = await client.getRoomType(msg.rid);
+          if (resolved) {
+            roomType = resolved;
+            roomTypes.set(msg.rid, roomType);
+          }
+        } catch {
+          // Fall back to the default below if the server lookup fails.
+        }
+      }
+      const sub: RocketChatSubscriptionRecord = { rid: msg.rid, t: roomType ?? "c" };
       const event = await toInboundEvent(accountId, sub, msg, account.serverUrl, client);
       logger.info(
         `[rocketchat:${accountId}] inbound from ${event.senderName}: "${event.text.slice(0, 80)}"`,
@@ -514,11 +526,7 @@ async function startDdpGateway(
     },
   });
 
-  const wakeup = () => {
-    logger.info(`[rocketchat:${accountId}] ddp wakeup (no-op for websocket transport)`);
-  };
-
-  activeClients.set(accountId, { client, generation, wakeup });
+  activeClients.set(accountId, { client, generation });
   connection.start();
 
   try {
@@ -535,6 +543,7 @@ async function startDdpGateway(
     if (current?.generation === generation) {
       activeClients.delete(accountId);
     }
+    connectionStatus.delete(accountId);
     ctx.setStatus?.("stopped");
   }
 }

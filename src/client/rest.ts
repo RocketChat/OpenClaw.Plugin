@@ -148,6 +148,17 @@ export class RocketChatClient {
     return { text, quotedId };
   }
 
+  /** Resolve a room's type (`d`/`p`/`c`) on demand, used for rooms created after connect. */
+  async getRoomType(roomId: string): Promise<string | undefined> {
+    const payload = await this.requestJson(
+      new URL(`/api/v1/rooms.info?roomId=${encodeURIComponent(roomId)}`, this.serverUrl),
+      { method: "GET" },
+    );
+    const room = asObject(payload.room);
+    const t = room.t;
+    return typeof t === "string" && t.length > 0 ? t : undefined;
+  }
+
   async downloadAttachmentToTempFile(
     url: string,
     options?: { fileName?: string },

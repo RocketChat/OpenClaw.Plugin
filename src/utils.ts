@@ -48,3 +48,6 @@ export function extractQuotedMessageId(link: string): string | undefined {
     return undefined;
   }
 }
+
+/** Sentinel roomId used for grants that permit direct-message (DM) access only. */
+export const DM_SCOPE = "dm";

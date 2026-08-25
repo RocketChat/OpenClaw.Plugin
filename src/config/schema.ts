@@ -23,7 +23,6 @@ const transportSchema = z.preprocess(
       .object({
         mode: z.literal("websocket"),
         reconnectDelayMs: z.number().int().positive().default(2_000).optional(),
-        maxConcurrent: z.number().int().positive().default(4).optional(),
       })
       .strict(),
   ]),

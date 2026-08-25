@@ -76,8 +76,7 @@ function parseLoginChallenge(json: JsonObject): LoginChallenge | null {
   const explicitChallenge =
     /^(totp-required|code-required|email-required|totp-invalid|code-invalid)$/i.test(errorType) ||
     (status === "error" &&
-      /(two-factor|verification code|2fa|totp|enter the code)/i.test(message)) ||
-    /totp-required|code-required|email-required/i.test(errorType);
+      /(two-factor|verification code|2fa|totp|enter the code)/i.test(message));
 
   if (!explicitChallenge) return null;
 
@@ -281,40 +280,6 @@ export async function listGroupMembers(
   return [];
 }
 
-export async function listPublicChannels(
-  baseUrl: string,
-  auth: RCLoginResult,
-  count = 100,
-): Promise<RocketChatGroup[]> {
-  const url = new URL("/api/v1/channels.list", baseUrl);
-  url.searchParams.set("count", String(count));
-  const json = await adminFetch(baseUrl, url.toString(), {
-    method: "GET",
-    userId: auth.userId,
-    authToken: auth.authToken,
-  });
-  const channels = (json.channels as Array<{ _id: string; name: string; t?: string }>) ?? [];
-  return channels
-    .filter((c) => c.name && c.name !== c._id)
-    .map((c) => ({ _id: c._id, name: c.name, isPrivate: c.t === "p" }));
-}
-
-export async function listGroups(
-  baseUrl: string,
-  auth: RCLoginResult,
-  count = 100,
-): Promise<RocketChatGroup[]> {
-  const json = await adminFetch(baseUrl, `/api/v1/groups.list?count=${count}`, {
-    method: "GET",
-    userId: auth.userId,
-    authToken: auth.authToken,
-  });
-  const groups = (json.groups as Array<{ _id: string; name: string; t?: string }>) ?? [];
-  return groups
-    .filter((g) => g.name && g.name !== g._id)
-    .map((g) => ({ _id: g._id, name: g.name, isPrivate: g.t === "p" }));
-}
-
 export async function getGroupByName(
   baseUrl: string,
   auth: RCLoginResult,
@@ -337,21 +302,6 @@ export async function getGroupByName(
     } catch {}
   }
   return null;
-}
-
-export async function kickFromGroup(
-  baseUrl: string,
-  auth: RCLoginResult,
-  groupId: string,
-  username: string,
-  isPrivate = true,
-): Promise<void> {
-  const endpoint = isPrivate ? "/api/v1/groups.kick" : "/api/v1/channels.kick";
-  await adminFetch(baseUrl, endpoint, {
-    userId: auth.userId,
-    authToken: auth.authToken,
-    body: { roomId: groupId, username },
-  });
 }
 
 export async function inviteToGroup(

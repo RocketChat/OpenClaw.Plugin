@@ -112,7 +112,6 @@ export const rocketchatPlugin = createChatChannelPlugin<ResolvedAccount>({
         }
         const tmidOptions = ctx.replyToId ? { tmid: ctx.replyToId } : undefined;
         const messageId = await client.postMessage(ctx.to, ctx.text, tmidOptions);
-        entry?.wakeup?.();
         return { channel: "rocketchat", ok: true, messageId };
       },
       sendMedia: async (ctx) => {
@@ -179,7 +178,6 @@ export const rocketchatPlugin = createChatChannelPlugin<ResolvedAccount>({
           }
         }
 
-        entry?.wakeup?.();
         return { channel: "rocketchat", ok: true, messageId: "" };
       },
     },

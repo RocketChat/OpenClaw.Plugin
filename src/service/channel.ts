@@ -1,5 +1,6 @@
 import type { InboundEvent } from "../types.js";
 import type { ChannelRuleOptions } from "../types.js";
+import { DM_SCOPE } from "../utils.js";
 import { RocketChatClient } from "../client/rest.js";
 import type { RCLoginResult } from "../types.js";
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
@@ -23,7 +24,6 @@ import {
   createBotUser,
   loginAs,
   getGroupByName,
-  checkServerHealth,
   createDirectMessage,
   sendMessage,
   deleteUser,
@@ -32,7 +32,8 @@ import {
   listGroupMembers,
 } from "../cli/admin-api.js";
 import { loadAdmin } from "../cli/credentials.js";
-import { startGateway, activeClients } from "./gateway.js";
+import { startGateway } from "./gateway.js";
+import { activeClients, connectionStatus } from "./runtime-state.js";
 import { AccessStore } from "../config/access-store.js";
 
 const BROADCAST_MENTIONS = new Set(["here", "all", "everyone"]);
@@ -77,9 +78,6 @@ export type CommandContext = {
   roomType?: import("../types.js").InboundEvent["roomType"];
 };
 
-/** Sentinel roomId used for grants that permit direct-message (DM) access only. */
-const DM_SCOPE = "dm";
-
 export type CommandResult =
   | { action: "reply"; replyText: string }
   | { action: "passthrough" }
@@ -111,8 +109,6 @@ export async function matchCommand(text: string, ctx: CommandContext): Promise<C
       return { action: "reply", replyText: await runStatus(ctx) };
     case "add-bot":
       return { action: "reply", replyText: await runAddBot(ctx, argStr) };
-    case "bindings":
-      return { action: "reply", replyText: buildBindingsHelpText() };
     case "lend":
       return { action: "reply", replyText: await runLend(ctx, argStr) };
     case "revoke":
@@ -123,8 +119,6 @@ export async function matchCommand(text: string, ctx: CommandContext): Promise<C
       return { action: "reply", replyText: await runAddGroup(ctx, argStr) };
     case "compact":
       return { action: "openclaw-command", command: `/compact${argStr ? " " + argStr : ""}` };
-    case "clear":
-      return { action: "openclaw-command", command: `/clear${argStr ? " " + argStr : ""}` };
     case "reset":
       return { action: "openclaw-command", command: `/reset${argStr ? " " + argStr : ""}` };
     case "new":
@@ -159,25 +153,23 @@ function buildHelpText(): string {
       "Bot",
       [
         ["help", "this menu"],
-        ["status", "server / bot / agent"],
+        ["status", "gateway / bot / agent / runtime"],
         ["bots", "bots + their agents"],
         ["groups", "groups joined"],
         ["access", "who can use"],
         ["add-bot <user>", "create a bot"],
-        ["remove-bot <user>", "delete a bot"],
+        ["remove-bot <user...>", "delete bot(s)"],
         ["add-group <group> [bot]", "invite bot to group"],
         ["lend <group> <user>", "grant group access"],
         ["lend dm <user>", "grant DM access"],
         ["revoke <group> <user>", "revoke group access"],
         ["revoke dm <user>", "revoke DM access"],
-        ["bindings", "agent docs"],
       ],
     ],
     [
       "Context",
       [
         ["compact", "compress history"],
-        ["clear", "clear, keep memory"],
         ["reset", "wipe all"],
         ["new [model]", "fresh start"],
       ],
@@ -215,33 +207,6 @@ function buildHelpText(): string {
     }
   }
   return lines.join("\n");
-}
-
-function buildBindingsHelpText(): string {
-  return [
-    "**Agent & bindings (managed by OpenClaw CLI)**",
-    "This plugin does not manage agents/bindings - use the official OpenClaw commands:",
-    "",
-    "List agents + bindings:",
-    "  `openclaw agents list --bindings`",
-    "",
-    "Add a new agent:",
-    "  `openclaw agents add <id>`",
-    "",
-    "Set agent identity (name/emoji/avatar):",
-    '  `openclaw agents set-identity --agent <id> --name "..."`',
-    "",
-    "Check channel connectivity:",
-    "  `openclaw channels status --probe`",
-    "",
-    "Restart the gateway (apply binding changes):",
-    "  `openclaw gateway restart`",
-    "",
-    "Docs:",
-    "- Agents CLI: https://docs.openclaw.ai/cli/agents",
-    "- Multi-agent routing: https://docs.openclaw.ai/concepts/multi-agent",
-    "- Models: https://docs.openclaw.ai/concepts/models",
-  ].join("\n");
 }
 
 function runBots(): string {
@@ -403,15 +368,18 @@ function parseArgs(argStr: string): { positional: string[]; flags: Record<string
 
 async function runStatus(ctx: CommandContext): Promise<string> {
   const mention = ctx.account.mentionNames[0] ?? ctx.account.accountId;
-  const online = await checkServerHealth(ctx.account.serverUrl);
+  const gateway =
+    connectionStatus.get(ctx.account.accountId) ??
+    (activeClients.has(ctx.account.accountId) ? "online" : "stopped");
   const bindings = readBindingsForAccount(ctx.account.accountId);
   const agent = bindings[0]?.agentId ?? "(unbound)";
-  const server = ctx.account.serverUrl;
+  const runtime = ctx.channelRuntime ? "ready" : "unavailable";
   return [
     "**Status**",
-    `- server - ${online ? "online" : "offline"} (${server})`,
+    `- gateway - ${gateway}`,
     `- bot - @${mention}`,
     `- agent - ${agent}`,
+    `- runtime - ${runtime}`,
   ].join("\n");
 }
 
@@ -703,58 +671,69 @@ function assertCanDelegate(ctx: CommandContext, roomId: string): string | undefi
 
 async function runRemoveBot(ctx: CommandContext, argStr: string): Promise<string> {
   const { positional } = parseArgs(argStr);
-  const username = positional[0]?.trim().replace(/^@+/, "");
-  if (!username)
-    return "Usage: `!remove-bot <username>` - delete a bot account (server user + OpenClaw config)";
+  const usernames = positional.map((p) => p.trim().replace(/^@+/, "")).filter(Boolean);
+  if (usernames.length === 0)
+    return "Usage: `!remove-bot <username...>` - delete one or more bot accounts (server user + OpenClaw config)";
 
   try {
     const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
+    const blocks: string[] = [];
+    let removedCount = 0;
 
-    const configured = readAccount(username);
-    const onServer = await getUserInfo(ctx.account.serverUrl, auth, { username });
-    if (!configured && !onServer) {
-      return `No bot named @${username} found on the server or in OpenClaw config. Nothing to remove.`;
+    for (const username of usernames) {
+      const result = await removeSingleBot(ctx, auth, username);
+      if (result.removed) removedCount++;
+      blocks.push(result.text);
     }
 
-    const live = activeClients.get(username);
-    if (live) {
-      try {
-        live.wakeup();
-      } catch {
-        /* no-op */
-      }
-      activeClients.delete(username);
-    }
-
-    let serverNote = "";
-    try {
-      await deleteUser(ctx.account.serverUrl, auth, username);
-      serverNote = "Rocket.Chat user deleted.";
-    } catch (e: unknown) {
-      serverNote = `Could not delete Rocket.Chat user: ${e instanceof Error ? e.message : String(e)}`;
-    }
-
-    const existingBindings = readBindingsForAccount(username);
-    const boundAgent = existingBindings[0]?.agentId;
-    const ownsDedicatedAgent = boundAgent === `rc-${username}`;
-
-    removeBindingsForAccount(username);
-    removeAccount(username);
-    if (ownsDedicatedAgent) {
-      removeAgentDir(username);
-    }
-
-    return [
-      `**Removed bot @${username}**`,
-      `- ${serverNote}`,
-      `- OpenClaw config account + agent binding removed.`,
-      ownsDedicatedAgent
-        ? `- Agent workspace \`rc-${username}\` removed.`
-        : `- Kept shared agent \`${boundAgent}\` (bot was not its owner).`,
-    ].join("\n");
+    return [`**Removed ${removedCount}/${usernames.length} bot(s)**`, ...blocks].join("\n");
   } catch (e: unknown) {
-    return `Failed to remove bot: ${e instanceof Error ? e.message : String(e)}`;
+    return `Failed to remove bot(s): ${e instanceof Error ? e.message : String(e)}`;
   }
+}
+
+async function removeSingleBot(
+  ctx: CommandContext,
+  auth: RCLoginResult,
+  username: string,
+): Promise<{ removed: boolean; text: string }> {
+  const configured = readAccount(username);
+  const onServer = await getUserInfo(ctx.account.serverUrl, auth, { username });
+  if (!configured && !onServer) {
+    return {
+      removed: false,
+      text: `- @${username}: not found on server or in OpenClaw config. Skipped.`,
+    };
+  }
+
+  activeClients.delete(username);
+
+  let serverNote = "";
+  try {
+    await deleteUser(ctx.account.serverUrl, auth, username);
+    serverNote = "Rocket.Chat user deleted.";
+  } catch (e: unknown) {
+    serverNote = `Could not delete Rocket.Chat user: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  const existingBindings = readBindingsForAccount(username);
+  const boundAgent = existingBindings[0]?.agentId;
+  const ownsDedicatedAgent = boundAgent === `rc-${username}`;
+
+  removeBindingsForAccount(username);
+  removeAccount(username);
+  if (ownsDedicatedAgent) {
+    removeAgentDir(username);
+  }
+
+  const lines = [
+    `- @${username}: ${serverNote}`,
+    `  OpenClaw config account + agent binding removed.`,
+    ownsDedicatedAgent
+      ? `  Agent workspace \`rc-${username}\` removed.`
+      : `  Kept shared agent \`${boundAgent}\` (bot was not its owner).`,
+  ];
+  return { removed: true, text: lines.join("\n") };
 }
 
 async function runAddGroup(ctx: CommandContext, argStr: string): Promise<string> {

@@ -421,8 +421,7 @@ export async function runSetup(): Promise<void> {
     { label: "Transport", value: "websocket" },
   ]);
   printNextSteps([
-    `Restart OpenClaw: ${color.cyan("openclaw restart")}`,
-    `Message ${color.cyan(`@${botUsername}`)} in Rocket.Chat`,
+    `Message ${color.cyan(`@${botUsername}`)} in Rocket.Chat — OpenClaw reloads the config automatically, so the bot comes online on its own`,
   ]);
 
   p.outro(color.green("Setup complete"));
