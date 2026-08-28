@@ -265,31 +265,78 @@ export async function runSetup(): Promise<void> {
 
   const allAccounts = readAllAccounts();
 
-  let existing: (typeof allAccounts)[number] | null;
-  if (allAccounts.length > 1) {
-    const accountOptions = allAccounts.map((a, i) => ({
-      value: String(i),
-      label: `${i + 1}. @${a.mentionNames[0] ?? a.auth.userId} — ${a.serverUrl}`,
-    }));
-    accountOptions.push({
-      value: "new",
-      label: `${allAccounts.length + 1}. New setup (different server)`,
+  const serversMap = new Map<string, typeof allAccounts>();
+  for (const a of allAccounts) {
+    const list = serversMap.get(a.serverUrl) ?? [];
+    list.push(a);
+    serversMap.set(a.serverUrl, list);
+  }
+  const uniqueServers = [...serversMap.entries()].map(([url, accs]) => ({ url, accounts: accs }));
+
+  const hasExisting = uniqueServers.length > 0;
+
+  let action: string;
+  if (hasExisting) {
+    action = await promptSelect<string>({
+      message: "What would you like to do?",
+      options: [
+        { value: "create", label: "Create new bot" },
+        { value: "relogin", label: "Login as different admin" },
+        { value: "delete", label: "Delete account data" },
+        { value: "cancel", label: "Exit" },
+      ],
     });
-    const choice = await promptSelect<string>({
-      message: "Which account would you like to use?",
-      options: accountOptions,
-    });
-    existing = choice === "new" ? null : allAccounts[Number(choice)]!;
-  } else if (allAccounts.length === 1) {
-    existing = allAccounts[0]!;
   } else {
-    existing = null;
+    action = "create";
   }
 
-  let rcUrl = existing ? existing.serverUrl : await promptServerUrl("http://localhost:3000");
+  if (action === "cancel") {
+    p.outro(color.dim("Setup aborted."));
+    return;
+  }
+  if (action === "delete") {
+    p.note(`To delete account data, visit:\n${color.cyan(DOC_LINK)}`, "Delete account data");
+    p.outro(color.dim("Setup aborted."));
+    return;
+  }
+
+  let rcUrl: string;
+  let serverAccounts: typeof allAccounts | null = null;
+
+  if (action === "create" || action === "relogin") {
+    if (uniqueServers.length > 1) {
+      const serverOptions = uniqueServers.map((s, i) => ({
+        value: String(i),
+        label: `${i + 1}. ${s.url} (${s.accounts.length} bot${s.accounts.length === 1 ? "" : "s"})`,
+      }));
+      serverOptions.push({
+        value: "new",
+        label: `${uniqueServers.length + 1}. New server`,
+      });
+      const choice = await promptSelect<string>({
+        message: "Which server?",
+        options: serverOptions,
+      });
+      if (choice === "new") {
+        rcUrl = await promptServerUrl("http://localhost:3000");
+      } else {
+        const selected = uniqueServers[Number(choice)]!;
+        rcUrl = selected.url;
+        serverAccounts = selected.accounts;
+      }
+    } else if (uniqueServers.length === 1) {
+      rcUrl = uniqueServers[0]!.url;
+      serverAccounts = uniqueServers[0]!.accounts;
+    } else {
+      rcUrl = await promptServerUrl("http://localhost:3000");
+    }
+  } else {
+    rcUrl = await promptServerUrl("http://localhost:3000");
+  }
+
   let adminAuth: RCLoginResult | null = null;
 
-  if (existing) {
+  if (serverAccounts) {
     const online = await checkServerHealth(rcUrl);
     await showServerStatus(rcUrl, async () => online);
 
@@ -307,51 +354,10 @@ export async function runSetup(): Promise<void> {
       }
       rcUrl = await promptServerUrl("https://chat.example.com");
       adminAuth = await resolveAdminAuth(rcUrl, true);
+    } else if (action === "relogin") {
+      adminAuth = await resolveAdminAuth(rcUrl, true);
     } else {
-      const action = await promptSelect<string>({
-        message: `Server ${color.cyan(rcUrl)} — @${existing.mentionNames[0] ?? existing.auth.userId}. What would you like to do?`,
-        options: [
-          { value: "continue", label: "Create new bot" },
-          { value: "relogin", label: "Login as different admin" },
-          { value: "newserver", label: "Connect a server" },
-          { value: "delete", label: "Delete account data" },
-          { value: "cancel", label: "Exit" },
-        ],
-      });
-
-      if (action === "cancel") {
-        p.outro(color.dim("Setup aborted."));
-        return;
-      }
-      if (action === "delete") {
-        p.note(`To delete account data, visit:\n${color.cyan(DOC_LINK)}`, "Delete account data");
-        p.outro(color.dim("Setup aborted."));
-        return;
-      }
-      if (action === "newserver") {
-        rcUrl = await promptServerUrl(rcUrl);
-        const match = allAccounts.find((a) => a.serverUrl === rcUrl);
-        if (match) {
-          p.log.info(
-            `An account for ${color.cyan(rcUrl)} already exists (@${match.mentionNames[0] ?? match.auth.userId}).`,
-          );
-          const reuse = await promptConfirm({
-            message: "Reuse the existing configuration for this server?",
-            initialValue: true,
-          });
-          if (reuse) {
-            adminAuth = await resolveAdminAuth(rcUrl);
-          } else {
-            adminAuth = await resolveAdminAuth(rcUrl, true);
-          }
-        } else {
-          adminAuth = await resolveAdminAuth(rcUrl, true);
-        }
-      } else if (action === "relogin") {
-        adminAuth = await resolveAdminAuth(rcUrl, true);
-      } else if (action === "continue") {
-        adminAuth = await resolveAdminAuth(rcUrl);
-      }
+      adminAuth = await resolveAdminAuth(rcUrl);
     }
   }
 
@@ -369,7 +375,7 @@ export async function runSetup(): Promise<void> {
   const botUsername = await promptText({
     message: "Bot Rocket.Chat username",
     placeholder: "rocketbot",
-    defaultValue: existing?.mentionNames[0] ?? "rocketbot",
+    defaultValue: serverAccounts?.[0]?.mentionNames[0] ?? "rocketbot",
     validate: (value) => {
       const trimmed = (value ?? "").trim();
       if (!trimmed) return "Username is required";
@@ -453,7 +459,7 @@ export async function runSetup(): Promise<void> {
         transport: { mode: "websocket" },
         mentionNames: [botUsername],
         auth: { mode: "token", userId: botAuth.userId, accessToken: botAuth.authToken },
-        replaceConnection: !existing || existing.serverUrl !== rcUrl,
+        replaceConnection: !serverAccounts || !serverAccounts.some((a) => a.serverUrl === rcUrl),
         ...(ownerUsername ? { owner: ownerUsername } : {}),
       });
     });
