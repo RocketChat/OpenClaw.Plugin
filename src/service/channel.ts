@@ -31,6 +31,7 @@ import {
   inviteToGroup,
   listGroupMembers,
 } from "../cli/admin-api.js";
+import { checkBotCreationLimit, recordBotCreation } from "../cli/rate-limiter.js";
 import { loadAdmin } from "../cli/credentials.js";
 import { startGateway } from "./gateway.js";
 import { activeClients, connectionStatus } from "./runtime-state.js";
@@ -43,6 +44,10 @@ export function shouldHandleInboundEvent(
   options: ChannelRuleOptions,
 ): boolean {
   if (event.senderId === options.botUserId) {
+    return false;
+  }
+
+  if (options.knownBotUserIds?.has(event.senderId)) {
     return false;
   }
 
@@ -85,6 +90,26 @@ export type CommandResult =
 
 const COMMAND_RE = /^\s*!(\S+)(?:\s+([\s\S]*))?$/i;
 
+/**
+ * Commands restricted to the bot owner (`accounts.<id>.owner`). Any other user
+ * with access who tries one of these gets a permission reply and the command is
+ * never executed or forwarded to OpenClaw.
+ */
+const OWNER_ONLY_COMMANDS = new Set([
+  "add-bot",
+  "remove-bot",
+  "add-group",
+  "revoke",
+  "access",
+  "bots",
+]);
+
+function isOwner(ctx: CommandContext): boolean {
+  const owner = ctx.account.owner?.trim().replace(/^@+/, "").toLowerCase();
+  const actor = ctx.senderName?.trim().replace(/^@+/, "").toLowerCase();
+  return !!owner && !!actor && owner === actor;
+}
+
 export async function matchCommand(text: string, ctx: CommandContext): Promise<CommandResult> {
   const normalized = text
     .replace(/[\u200B\u200C\u200D\uFEFF]/g, "")
@@ -96,9 +121,16 @@ export async function matchCommand(text: string, ctx: CommandContext): Promise<C
   const cmd = match[1]!.toLowerCase();
   const argStr = match[2] ?? "";
 
+  if (OWNER_ONLY_COMMANDS.has(cmd) && !isOwner(ctx)) {
+    return {
+      action: "reply",
+      replyText: `\`!${cmd}\` is owner-only. Contact ${ctx.account.owner ? `@${ctx.account.owner}` : "the bot owner"}.`,
+    };
+  }
+
   switch (cmd) {
     case "help":
-      return { action: "reply", replyText: buildHelpText() };
+      return { action: "reply", replyText: buildHelpText(isOwner(ctx)) };
     case "access":
       return { action: "reply", replyText: await runAccess(ctx) };
     case "bots":
@@ -147,7 +179,7 @@ export async function matchCommand(text: string, ctx: CommandContext): Promise<C
   }
 }
 
-function buildHelpText(): string {
+function buildHelpText(showAll: boolean): string {
   const groups: Array<[string, Array<[string, string]>]> = [
     [
       "Bot",
@@ -174,12 +206,7 @@ function buildHelpText(): string {
         ["new [model]", "fresh start"],
       ],
     ],
-    [
-      "Model",
-      [
-        ["model [name|#]", "list or switch"],
-      ],
-    ],
+    ["Model", [["model [name|#]", "list or switch"]]],
     [
       "Behavior",
       [
@@ -201,8 +228,12 @@ function buildHelpText(): string {
 
   const lines: string[] = ["Commands"];
   for (const [title, cmds] of groups) {
+    const visible = showAll
+      ? cmds
+      : cmds.filter(([cmd]) => !OWNER_ONLY_COMMANDS.has(cmd.split(/\s/)[0]!));
+    if (visible.length === 0) continue;
     lines.push("", `**${title}**`);
-    for (const [cmd, desc] of cmds) {
+    for (const [cmd, desc] of visible) {
       lines.push(`\`!${cmd}\` ${desc}`);
     }
   }
@@ -220,12 +251,12 @@ function runBots(): string {
     const mention = account.mentionNames[0] ?? account.accountId;
     const bindings = readBindingsForAccount(account.accountId);
     if (bindings.length === 0) {
-      lines.push(`- @${mention} - (no agent bound)`);
+      lines.push(`- ${mention} - (no agent bound)`);
       continue;
     }
     for (const binding of bindings) {
       const scope = binding.peer ? `${binding.peer.kind} ${binding.peer.id}` : "global";
-      lines.push(`- @${mention} → ${binding.agentId} (${scope})`);
+      lines.push(`- ${mention} → ${binding.agentId} (${scope})`);
     }
   }
 
@@ -309,22 +340,29 @@ async function runAccess(ctx: CommandContext): Promise<string> {
   store.close();
 
   const lines: string[] = [];
-  lines.push(`owner - ${owner ? `@${owner}` : "(unset)"}`);
+  lines.push(`owner - ${owner ? `${owner}` : "(unset)"}`);
   if (grants.length === 0) {
     lines.push("No grants. Only the owner can use the bot.");
   } else {
+    // Group grants per user so a user with both group + DM access shows on one line.
+    const byUser = new Map<string, string[]>();
     for (const grant of grants) {
-      const where =
+      const scope =
         grant.roomId === "*"
-          ? "everywhere"
+          ? "everywhere (group + dm)"
           : grant.roomId === DM_SCOPE
-            ? "direct messages"
-            : `#${grant.roomName ?? grant.roomId}`;
-      lines.push(`- @${grant.username} - ${where}`);
+            ? "dm"
+            : `group: #${grant.roomName ?? grant.roomId}`;
+      const list = byUser.get(grant.username) ?? [];
+      list.push(scope);
+      byUser.set(grant.username, list);
+    }
+    for (const [username, scopes] of byUser) {
+      lines.push(`- ${username} - ${scopes.join(", ")}`);
     }
   }
 
-  return [`**Access for @${mention}**`, ...lines].join("\n");
+  return [`**Access for ${mention}**`, ...lines].join("\n");
 }
 
 function adminAuth(ctx: CommandContext): RCLoginResult {
@@ -377,7 +415,7 @@ async function runStatus(ctx: CommandContext): Promise<string> {
   return [
     "**Status**",
     `- gateway - ${gateway}`,
-    `- bot - @${mention}`,
+    `- bot - ${mention}`,
     `- agent - ${agent}`,
     `- runtime - ${runtime}`,
   ].join("\n");
@@ -415,7 +453,7 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
     agent = result.agentId;
     if (result.fallback) {
       return [
-        `Created bot @${username}, but could not auto-create a dedicated agent.`,
+        `Created bot ${username}, but could not auto-create a dedicated agent.`,
         `Falling back to 'main' - memory is isolated per-bot via session keys, but the bot shares the main agent workspace.`,
       ].join("\n");
     }
@@ -425,19 +463,25 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
   }
 
   try {
+    const limitCheck = checkBotCreationLimit("inline", { serverUrl: ctx.account.serverUrl });
+    if (!limitCheck.allowed) {
+      return limitCheck.reason ?? "Bot creation limit reached.";
+    }
+
     const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
 
     const existingServer = await getUserInfo(ctx.account.serverUrl, auth, { username });
     const existingConfig = readAccount(username.toLowerCase());
     if (existingServer) {
-      return `Bot @${username} already exists on the Rocket.Chat server. Use \`!remove-bot ${username}\` first if you want to recreate it.`;
+      return `Bot ${username} already exists on the Rocket.Chat server. Use \`!remove-bot ${username}\` first if you want to recreate it.`;
     }
     if (existingConfig) {
-      return `Bot @${username} already exists in OpenClaw config. Use \`!remove-bot ${username}\` first if you want to recreate it.`;
+      return `Bot ${username} already exists in OpenClaw config. Use \`!remove-bot ${username}\` first if you want to recreate it.`;
     }
 
     await createBotUser(ctx.account.serverUrl, auth, { username, name, password, email });
     const botAuth = await loginAs(ctx.account.serverUrl, username, password);
+    recordBotCreation(username, "inline");
     const accountId = username;
 
     addAccount({
@@ -459,12 +503,12 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
           ctx.account.serverUrl,
           botAuth,
           dmRoom,
-          `Hi! I'm @${username}, your new Rocket.Chat bot connected to OpenClaw (agent \`${agent}\`). ` +
+          `Hi! I'm ${username}, your new Rocket.Chat bot connected to OpenClaw (agent \`${agent}\`). ` +
             `Once you see status online, confirm with \`!status\` or \`!help\` to know more.`,
         );
-        dmNote = `Welcome DM sent to @${owner}.`;
+        dmNote = `Welcome DM sent to ${owner}.`;
       } catch (e: unknown) {
-        dmNote = `Could not DM @${owner}: ${e instanceof Error ? e.message : String(e)}`;
+        dmNote = `Could not DM ${owner}: ${e instanceof Error ? e.message : String(e)}`;
       }
     }
 
@@ -477,7 +521,7 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
     });
 
     return [
-      `**Created bot @${username}**`,
+      `**Created bot ${username}**`,
       `agent - ${agent}${agentNote}`,
       `password (shown once) - \`${password}\``,
       ...(dmNote ? [dmNote] : []),
@@ -522,6 +566,37 @@ function startBotAccount(
   );
 }
 
+/**
+ * Notify the affected user about a lend/revoke. The notice is always sent
+ * via DM to the user so that group chats only show the command reply, not a
+ * second personal notification. Returns an error note to append to the
+ * command reply if the notice could not be delivered.
+ */
+async function notifyAccessChange(
+  ctx: CommandContext,
+  cleanUser: string,
+  roomId: string,
+  scopeLabel: string,
+  action: "granted" | "revoked",
+  targetIsBot: boolean,
+): Promise<string | undefined> {
+  const botMention = ctx.account.mentionNames[0] ?? ctx.accountId;
+  const how =
+    roomId === DM_SCOPE ? "You can now DM the bot." : "You can now mention the bot there.";
+  const text =
+    action === "granted"
+      ? `You've been granted access to ${botMention} in ${scopeLabel}. ${how}`
+      : `Your access to ${botMention} in ${scopeLabel} has been revoked.`;
+  try {
+    const botAuth = adminAuth(ctx);
+    const dmRoomId = await createDirectMessage(ctx.account.serverUrl, botAuth, cleanUser);
+    await ctx.client.postMessage(dmRoomId, text);
+    return undefined;
+  } catch (e: unknown) {
+    return ` (notice to ${cleanUser} failed: ${e instanceof Error ? e.message : String(e)})`;
+  }
+}
+
 async function runLend(ctx: CommandContext, argStr: string): Promise<string> {
   const { positional, flags } = parseArgs(argStr);
   const wantDm = flags.dm === "true";
@@ -548,8 +623,8 @@ async function runLend(ctx: CommandContext, argStr: string): Promise<string> {
 
   try {
     const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
-    const userExists = await getUserInfo(ctx.account.serverUrl, auth, { username: cleanUser });
-    if (!userExists) return `User @${cleanUser} not found on the Rocket.Chat server.`;
+    const targetUser = await getUserInfo(ctx.account.serverUrl, auth, { username: cleanUser });
+    if (!targetUser) return `User ${cleanUser} not found on the Rocket.Chat server.`;
 
     let roomId: string;
     let roomName: string;
@@ -577,9 +652,18 @@ async function runLend(ctx: CommandContext, argStr: string): Promise<string> {
     store.close();
 
     const scope = roomId === DM_SCOPE ? "direct messages" : `#${roomName}`;
-    return ok
-      ? `Granted @${cleanUser} access to @${ctx.account.mentionNames[0] ?? ctx.accountId} in ${scope}.`
-      : `That grant already exists.`;
+    if (ok) {
+      const notice = await notifyAccessChange(
+        ctx,
+        cleanUser,
+        roomId,
+        scope,
+        "granted",
+        !!targetUser.roles?.includes("bot"),
+      );
+      return `Granted ${cleanUser} access to ${ctx.account.mentionNames[0] ?? ctx.accountId} in ${scope}.${notice ?? ""}`;
+    }
+    return `That grant already exists.`;
   } catch (e: unknown) {
     return `Failed to lend: ${e instanceof Error ? e.message : String(e)}`;
   }
@@ -611,8 +695,8 @@ async function runRevoke(ctx: CommandContext, argStr: string): Promise<string> {
 
   try {
     const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
-    const userExists = await getUserInfo(ctx.account.serverUrl, auth, { username: cleanUser });
-    if (!userExists) return `User @${cleanUser} not found on the Rocket.Chat server.`;
+    const targetUser = await getUserInfo(ctx.account.serverUrl, auth, { username: cleanUser });
+    if (!targetUser) return `User ${cleanUser} not found on the Rocket.Chat server.`;
 
     let roomId: string;
     let roomName: string;
@@ -636,9 +720,18 @@ async function runRevoke(ctx: CommandContext, argStr: string): Promise<string> {
     store.close();
 
     const scope = roomId === DM_SCOPE ? "direct messages" : `#${roomName}`;
-    return ok
-      ? `Revoked @${cleanUser}'s access to @${ctx.account.mentionNames[0] ?? ctx.accountId} in ${scope}.`
-      : `No such grant found. @${cleanUser} did not have access in ${scope}.`;
+    if (ok) {
+      const notice = await notifyAccessChange(
+        ctx,
+        cleanUser,
+        roomId,
+        scope,
+        "revoked",
+        !!targetUser.roles?.includes("bot"),
+      );
+      return `Revoked ${cleanUser}'s access to ${ctx.account.mentionNames[0] ?? ctx.accountId} in ${scope}.${notice ?? ""}`;
+    }
+    return `No such grant found. ${cleanUser} did not have access in ${scope}.`;
   } catch (e: unknown) {
     return `Failed to revoke: ${e instanceof Error ? e.message : String(e)}`;
   }
@@ -664,9 +757,7 @@ function assertCanDelegate(ctx: CommandContext, roomId: string): string | undefi
     return g.roomId === "*" || g.roomId === roomId;
   });
 
-  return allowed
-    ? undefined
-    : "You can only grant access in spaces where you already have access.";
+  return allowed ? undefined : "You can only grant access in spaces where you already have access.";
 }
 
 async function runRemoveBot(ctx: CommandContext, argStr: string): Promise<string> {
@@ -702,7 +793,7 @@ async function removeSingleBot(
   if (!configured && !onServer) {
     return {
       removed: false,
-      text: `- @${username}: not found on server or in OpenClaw config. Skipped.`,
+      text: `- ${username}: not found on server or in OpenClaw config. Skipped.`,
     };
   }
 
@@ -727,7 +818,7 @@ async function removeSingleBot(
   }
 
   const lines = [
-    `- @${username}: ${serverNote}`,
+    `- ${username}: ${serverNote}`,
     `  OpenClaw config account + agent binding removed.`,
     ownsDedicatedAgent
       ? `  Agent workspace \`rc-${username}\` removed.`
@@ -749,11 +840,11 @@ async function runAddGroup(ctx: CommandContext, argStr: string): Promise<string>
 
     const botExists = await getUserInfo(ctx.account.serverUrl, auth, { username: botName });
     if (!botExists) {
-      return `Bot @${botName} not found on the Rocket.Chat server. Use \`!add-bot ${botName}\` to create it first.`;
+      return `Bot ${botName} not found on the Rocket.Chat server. Use \`!add-bot ${botName}\` to create it first.`;
     }
     const botConfigured = readAccount(botName.toLowerCase());
     if (!botConfigured) {
-      return `@${botName} exists on the server but is not configured in OpenClaw. Use \`!add-bot ${botName}\` to set it up.`;
+      return `${botName} exists on the server but is not configured in OpenClaw. Use \`!add-bot ${botName}\` to set it up.`;
     }
 
     const group = await getGroupByName(ctx.account.serverUrl, auth, groupName);
@@ -764,16 +855,16 @@ async function runAddGroup(ctx: CommandContext, argStr: string): Promise<string>
     const members = await listGroupMembers(ctx.account.serverUrl, auth, group._id);
     const alreadyIn = members.some((m) => m.username.toLowerCase() === botName.toLowerCase());
     if (alreadyIn) {
-      return `@${botName} is already a member of #${group.name}. No action needed.`;
+      return `${botName} is already a member of #${group.name}. No action needed.`;
     }
 
     try {
       await inviteToGroup(ctx.account.serverUrl, auth, group._id, botName, isPrivate);
     } catch (e: unknown) {
-      return `Failed to add @${botName} to #${group.name}: ${e instanceof Error ? e.message : String(e)}`;
+      return `Failed to add ${botName} to #${group.name}: ${e instanceof Error ? e.message : String(e)}`;
     }
 
-    return `Invited @${botName} to #${group.name}${isPrivate ? " (private group)" : " (channel)"}. The bot will start receiving messages there.`;
+    return `Invited ${botName} to #${group.name}${isPrivate ? " (private group)" : " (channel)"}. The bot will start receiving messages there.`;
   } catch (e: unknown) {
     return `Failed to add bot to group: ${e instanceof Error ? e.message : String(e)}`;
   }

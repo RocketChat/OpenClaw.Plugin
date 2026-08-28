@@ -173,6 +173,7 @@ export type ChannelRuntimeLike = {
 export type ChannelRuleOptions = {
   botUserId: string;
   mentionNames: string[];
+  knownBotUserIds?: Set<string>;
 };
 
 export type CheckpointState = {
@@ -203,6 +204,7 @@ export type RCUser = {
   _id: string;
   username: string;
   name: string;
+  roles?: string[];
 };
 
 export type AttachmentRecord = {

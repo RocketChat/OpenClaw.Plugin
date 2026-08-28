@@ -11,6 +11,7 @@ import type {
 } from "../types.js";
 import { shouldHandleInboundEvent, matchCommand } from "./channel.js";
 import { readAccount } from "../cli/config-updater.js";
+import { collectBotUserIdsForServer, collectBotUsernamesForServer } from "../cli/config-updater.js";
 import { AccessStore } from "../config/access-store.js";
 import { appendGroupHistory, getAndClearGroupHistory } from "./group-history.js";
 import { dispatchInboundEventWithChannelRuntime } from "./inbound.js";
@@ -94,7 +95,18 @@ async function handleMessage(
     channelRuntime,
     client,
     deliver: (payload, info) =>
-      sendReply(client, ddp, event.roomId, event.messageId, replyTmid, accountId, payload, info, isCommand, commandText),
+      sendReply(
+        client,
+        ddp,
+        event.roomId,
+        event.messageId,
+        replyTmid,
+        accountId,
+        payload,
+        info,
+        isCommand,
+        commandText,
+      ),
     onRecordError: (error) => {
       logger.error(
         `[rocketchat:${accountId}] failed to record inbound session: ${error instanceof Error ? error.message : String(error)}`,
@@ -111,12 +123,53 @@ async function handleMessage(
 }
 
 const OPENCLAW_CMD_NAMES = [
-  "acp", "activation", "agents", "approve", "btw", "commands", "compact", "config",
-  "context", "debug", "diagnostics", "elevated", "exec", "export-session",
-  "export-trajectory", "fast", "focus", "goal", "help", "learn", "login", "mcp",
-  "models", "model", "name", "new", "plugins", "queue", "reasoning", "reset",
-  "restart", "send", "session", "skill", "status", "steer", "stop", "subagents",
-  "tasks", "think", "tools", "trace", "tts", "unfocus", "usage", "verbose", "whoami",
+  "acp",
+  "activation",
+  "agents",
+  "approve",
+  "btw",
+  "commands",
+  "compact",
+  "config",
+  "context",
+  "debug",
+  "diagnostics",
+  "elevated",
+  "exec",
+  "export-session",
+  "export-trajectory",
+  "fast",
+  "focus",
+  "goal",
+  "help",
+  "learn",
+  "login",
+  "mcp",
+  "models",
+  "model",
+  "name",
+  "new",
+  "plugins",
+  "queue",
+  "reasoning",
+  "reset",
+  "restart",
+  "send",
+  "session",
+  "skill",
+  "status",
+  "steer",
+  "stop",
+  "subagents",
+  "tasks",
+  "think",
+  "tools",
+  "trace",
+  "tts",
+  "unfocus",
+  "usage",
+  "verbose",
+  "whoami",
 ].join("|");
 const OPENCLAW_CMD_RE = new RegExp(`(?<![\\w/])/(${OPENCLAW_CMD_NAMES})(?![\\w-])`, "g");
 
@@ -179,7 +232,10 @@ function reformatTools(text: string): string {
       }
       out.push(lines[i]!);
     }
-    return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+    return out
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
   }
 
   // Verbose: one clean block per tool.
@@ -221,7 +277,10 @@ function reformatTools(text: string): string {
     }
   }
   flush();
-  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return out
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 function reformatCommandReply(command: string | null, text: string): string {
@@ -335,6 +394,9 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
     auth: account.auth,
   });
 
+  const knownBotUserIds = collectBotUserIdsForServer(account.serverUrl);
+  client.setBotUsernames(collectBotUsernamesForServer(account.serverUrl));
+
   const identity = await client.getIdentity();
   const generation = nextGeneration++;
   ctx.setStatus?.("connected");
@@ -345,7 +407,16 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
   const checkpoint = new CheckpointStore(checkpointPath, 250);
   const mentionNames = dedupeMentions([identity.username, ...account.mentionNames]);
 
-  return startDdpGateway(ctx, account, identity, client, checkpoint, mentionNames, generation);
+  return startDdpGateway(
+    ctx,
+    account,
+    identity,
+    client,
+    checkpoint,
+    mentionNames,
+    generation,
+    knownBotUserIds,
+  );
 }
 
 async function startDdpGateway(
@@ -356,6 +427,7 @@ async function startDdpGateway(
   checkpoint: CheckpointStore,
   mentionNames: string[],
   generation: number,
+  knownBotUserIds: Set<string>,
 ): Promise<void> {
   const accountId = account.accountId;
   const wsBase = new URL(account.serverUrl);
@@ -428,7 +500,13 @@ async function startDdpGateway(
         );
       }
 
-      if (!shouldHandleInboundEvent(event, { botUserId: identity.userId, mentionNames })) {
+      if (
+        !shouldHandleInboundEvent(event, {
+          botUserId: identity.userId,
+          mentionNames,
+          knownBotUserIds,
+        })
+      ) {
         if (event.roomType !== "direct") {
           appendGroupHistory(accountId, event.roomId, {
             sender: event.senderName,
@@ -439,11 +517,13 @@ async function startDdpGateway(
         return;
       }
 
-      if (isSenderDenied(event.senderName, account.owner, accountId, event.roomId, event.roomType)) {
+      if (
+        isSenderDenied(event.senderName, account.owner, accountId, event.roomId, event.roomType)
+      ) {
         const sendCmd = client.postMessage.bind(client);
         const tmidOpt = event.tmid ? { tmid: event.tmid } : undefined;
         const ownerLabel = account.owner ? `@${account.owner}` : "the bot owner";
-        const replyText = `**@${event.senderName}**: You don't have access to use this bot. Contact ${ownerLabel}.`;
+        const replyText = `You don't have access to use this bot. Contact ${ownerLabel}.`;
         try {
           await sendCmd(event.roomId, replyText, tmidOpt);
         } catch (err) {
@@ -489,9 +569,7 @@ async function startDdpGateway(
 
       if (cmdResult.action === "openclaw-command") {
         event.text = cmdResult.command;
-        logger.info(
-          `[rocketchat:${accountId}] passthrough OpenClaw command: ${cmdResult.command}`,
-        );
+        logger.info(`[rocketchat:${accountId}] passthrough OpenClaw command: ${cmdResult.command}`);
       }
 
       await markSeen(msg._id);
@@ -506,7 +584,16 @@ async function startDdpGateway(
       if (processingMessages.has(msg._id)) return;
       processingMessages.add(msg._id);
       try {
-        await handleMessage(ctx, event, client, connection, accountId, identity.username, cmdResult.action === "openclaw-command", cmdResult.action === "openclaw-command" ? event.text : null);
+        await handleMessage(
+          ctx,
+          event,
+          client,
+          connection,
+          accountId,
+          identity.username,
+          cmdResult.action === "openclaw-command",
+          cmdResult.action === "openclaw-command" ? event.text : null,
+        );
       } catch (err) {
         const reason = err instanceof Error ? err.message : String(err);
         logger.error(

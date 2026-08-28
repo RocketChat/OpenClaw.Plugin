@@ -182,7 +182,12 @@ export async function getUserInfo(
       authToken: auth.authToken,
     });
     const user = json.user as RCUser;
-    return { _id: user._id, username: user.username, name: user.name };
+    return {
+      _id: user._id,
+      username: user.username,
+      name: user.name,
+      ...(Array.isArray(user.roles) ? { roles: user.roles } : {}),
+    };
   } catch {
     return null;
   }

@@ -43,6 +43,15 @@ const accountSchema = z
 export const pluginConfigSchema = z
   .object({
     accounts: z.record(z.string().min(1), accountSchema),
+    limits: z
+      .object({
+        maxAccounts: z.number().int().positive().default(10).optional(),
+        maxBotsPerServer: z.number().int().positive().default(5).optional(),
+        botCreationCooldownMs: z.number().int().positive().default(60_000).optional(),
+        maxReconnects: z.number().int().positive().default(20).optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 

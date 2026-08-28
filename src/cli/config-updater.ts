@@ -37,6 +37,22 @@ export function readAllAccounts(): ExistingAccount[] {
     .filter((a): a is ExistingAccount => a !== null);
 }
 
+export function collectBotUserIdsForServer(serverUrl: string): Set<string> {
+  return new Set(
+    readAllAccounts()
+      .filter((a) => a.serverUrl === serverUrl)
+      .map((a) => a.auth.userId),
+  );
+}
+
+export function collectBotUsernamesForServer(serverUrl: string): Set<string> {
+  return new Set(
+    readAllAccounts()
+      .filter((a) => a.serverUrl === serverUrl)
+      .flatMap((a) => (a.mentionNames.length > 0 ? a.mentionNames : [a.accountId])),
+  );
+}
+
 export function readAccount(accountId = "main"): ExistingAccount | null {
   const cfg = readConfig() as Record<string, any>;
   const accounts = cfg?.channels?.rocketchat?.accounts;

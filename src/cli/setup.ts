@@ -14,7 +14,15 @@ import {
   inviteToGroup,
   getGroupByName,
 } from "./admin-api.js";
-import { updateConfig, readAccount, readAgentsList, addBinding, ensureAgentForBot, isAgentBound } from "./config-updater.js";
+import {
+  updateConfig,
+  readAllAccounts,
+  readAgentsList,
+  addBinding,
+  ensureAgentForBot,
+  isAgentBound,
+} from "./config-updater.js";
+import { checkBotCreationLimit, recordBotCreation } from "./rate-limiter.js";
 import { saveAdmin, loadAdmin, saveBotCredentials, loadBotCredentials } from "./credentials.js";
 import {
   color,
@@ -24,6 +32,7 @@ import {
   printSummary,
   promptConfirm,
   promptPassword,
+  promptPasswordConfirm,
   promptSelect,
   promptText,
   promptTwoFactorCode,
@@ -33,10 +42,16 @@ import {
 } from "./ui.js";
 import type { RCLoginResult } from "../types.js";
 
+type AdminLoginReason = "login-failed" | "not-admin" | "unauthorized" | "unreachable" | "error";
+
+type AdminLoginResult =
+  { ok: true; auth: RCLoginResult } | { ok: false; reason: AdminLoginReason; message?: string };
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_PATH = resolve(__dirname, "..", "..");
 let ACCOUNT_ID = "main";
 const OC_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
+const DOC_LINK = "https://openclaw.ai/docs/rocketchat";
 
 async function tryBotLogin(
   rcUrl: string,
@@ -153,15 +168,16 @@ export async function resolveAdminAuth(
   rcUrl: string,
   forceFresh = false,
 ): Promise<RCLoginResult | null> {
-  const savedAdmin = await loadAdmin(rcUrl);
-
-  if (savedAdmin && !forceFresh) {
-    const reuse = await promptConfirm({
-      message: `Reuse saved admin credentials for ${color.cyan(rcUrl)}?`,
-      initialValue: true,
-    });
-    if (reuse) {
-      return { userId: savedAdmin.userId, authToken: savedAdmin.authToken };
+  if (!forceFresh) {
+    const savedAdmin = (await loadAdmin(rcUrl)) ?? (await loadAdmin());
+    if (savedAdmin) {
+      const candidateAuth = { userId: savedAdmin.userId, authToken: savedAdmin.authToken };
+      const verdict = await verifyAdmin(rcUrl, candidateAuth);
+      if (verdict.ok) {
+        p.log.success(`Reusing saved admin credentials for ${color.cyan(rcUrl)}`);
+        return candidateAuth;
+      }
+      p.log.warn("Saved admin credentials are invalid for this server. Please log in again.");
     }
   }
 
@@ -170,41 +186,61 @@ export async function resolveAdminAuth(
     validate: (value) => ((value ?? "").trim() ? undefined : "Username is required"),
   });
 
-  const adminPass = await promptPassword({
-    message: "Admin password",
-    validate: (value) => (value ? undefined : "Password is required"),
-  });
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const adminPass = await promptPassword({
+      message:
+        attempt === 1
+          ? "Admin password"
+          : `Wrong password — re-enter for ${adminUser} (${3 - attempt} attempt${3 - attempt === 1 ? "" : "s"} left)`,
+      validate: (value) => (value ? undefined : "Password is required"),
+    });
 
-  return withSpinner("Logging in as admin", async () => {
-    try {
-      const adminAuth = await loginForServer(rcUrl, adminUser, adminPass, adminUser);
-      if (!adminAuth) return null;
-      const verdict = await verifyAdmin(rcUrl, adminAuth);
-      if (!verdict.ok) {
-        if (verdict.reason === "not-admin") {
-          p.log.error(
-            `"${adminUser}" is not an admin (missing 'admin' role). Bot creation requires an admin account.`,
-          );
-        } else if (verdict.reason === "unauthorized") {
-          p.log.error("Admin login expired or invalid. Please log in again.");
-        } else {
-          p.log.error("Could not verify admin status — Rocket.Chat server unreachable.");
+    const result = await withSpinner<AdminLoginResult>("Logging in as admin", async () => {
+      try {
+        const adminAuth = await loginForServer(rcUrl, adminUser, adminPass, adminUser);
+        if (!adminAuth) return { ok: false, reason: "login-failed" };
+        const verdict = await verifyAdmin(rcUrl, adminAuth);
+        if (!verdict.ok) {
+          return { ok: false, reason: verdict.reason as AdminLoginReason };
         }
-        return null;
+        await saveAdmin({
+          serverUrl: rcUrl,
+          userId: adminAuth.userId,
+          authToken: adminAuth.authToken,
+        });
+        p.log.success(`Logged in as ${color.cyan(adminUser)}`);
+        return { ok: true, auth: adminAuth };
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        return { ok: false, reason: "error", message };
       }
-      await saveAdmin({
-        serverUrl: rcUrl,
-        userId: adminAuth.userId,
-        authToken: adminAuth.authToken,
-      });
-      p.log.success(`Logged in as ${color.cyan(adminUser)}`);
-      return adminAuth;
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      p.log.error(`Login failed: ${message}`);
+    });
+
+    if (result.ok) return result.auth;
+
+    if (result.reason === "not-admin") {
+      p.log.error(
+        `"${adminUser}" is not an admin (missing 'admin' role). Bot creation requires an admin account.`,
+      );
+      return null;
+    } else if (result.reason === "unauthorized") {
+      p.log.error("Admin login expired or invalid. Please log in again.");
+    } else if (result.reason === "unreachable") {
+      p.log.error("Could not verify admin status — Rocket.Chat server unreachable.");
+      return null;
+    } else if (result.reason === "error") {
+      p.log.error(`Login failed: ${result.message}`);
+    } else {
+      p.log.error("Login failed: Unauthorized. Check the password and try again.");
+    }
+
+    if (attempt === 3) {
+      p.log.error("Too many failed attempts. Re-run setup to try again.");
       return null;
     }
-  });
+  }
+
+  return null;
 }
 
 async function promptBotPassword(botUsername: string): Promise<string> {
@@ -214,37 +250,46 @@ async function promptBotPassword(botUsername: string): Promise<string> {
     return savedBot.password;
   }
 
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const botPassword = await promptPassword({
-      message: attempt === 0 ? "Bot password" : "Bot password (min 6 characters)",
-      validate: (value) => {
-        if (!value) return "Password is required";
-        if (value.length < 6) return "Password must be at least 6 characters";
-        return undefined;
-      },
-    });
-    if (botPassword.length >= 6) return botPassword;
-    p.log.error("Password must be at least 6 characters.");
-  }
-
-  throw new Error("Valid bot password required");
+  return promptPasswordConfirm({
+    message: "Bot password (min 6 characters)",
+    validate: (value) => {
+      if (!value) return "Password is required";
+      if (value.length < 6) return "Password must be at least 6 characters";
+      return undefined;
+    },
+  });
 }
 
 export async function runSetup(): Promise<void> {
   p.intro(`${color.bgCyan(color.black(" OpenClaw "))} ${color.dim("×")} Rocket.Chat Setup`);
 
-  const existing = readAccount(ACCOUNT_ID);
+  const allAccounts = readAllAccounts();
+
+  let existing: (typeof allAccounts)[number] | null;
+  if (allAccounts.length > 1) {
+    const accountOptions = allAccounts.map((a, i) => ({
+      value: String(i),
+      label: `${i + 1}. @${a.mentionNames[0] ?? a.auth.userId} — ${a.serverUrl}`,
+    }));
+    accountOptions.push({
+      value: "new",
+      label: `${allAccounts.length + 1}. New setup (different server)`,
+    });
+    const choice = await promptSelect<string>({
+      message: "Which account would you like to use?",
+      options: accountOptions,
+    });
+    existing = choice === "new" ? null : allAccounts[Number(choice)]!;
+  } else if (allAccounts.length === 1) {
+    existing = allAccounts[0]!;
+  } else {
+    existing = null;
+  }
 
   let rcUrl = existing ? existing.serverUrl : await promptServerUrl("http://localhost:3000");
-  let adminAuth: RCLoginResult | null = existing ? await loadAdmin(rcUrl) : null;
+  let adminAuth: RCLoginResult | null = null;
 
   if (existing) {
-    printSummary([
-      { label: "Config", value: OC_CONFIG_PATH },
-      { label: "Server", value: existing.serverUrl },
-      { label: "Bot", value: `@${existing.mentionNames[0] ?? existing.auth.userId}` },
-    ]);
-
     const online = await checkServerHealth(rcUrl);
     await showServerStatus(rcUrl, async () => online);
 
@@ -253,7 +298,7 @@ export async function runSetup(): Promise<void> {
         message: "Saved server is unreachable. What would you like to do?",
         options: [
           { value: "newurl", label: "Enter a different Rocket.Chat URL" },
-          { value: "cancel", label: "Cancel — exit setup" },
+          { value: "cancel", label: "Exit" },
         ],
       });
       if (recovery === "cancel") {
@@ -261,14 +306,16 @@ export async function runSetup(): Promise<void> {
         return;
       }
       rcUrl = await promptServerUrl("https://chat.example.com");
-      adminAuth = null;
+      adminAuth = await resolveAdminAuth(rcUrl, true);
     } else {
       const action = await promptSelect<string>({
-        message: "Existing configuration found. What would you like to do?",
+        message: `Server ${color.cyan(rcUrl)} — @${existing.mentionNames[0] ?? existing.auth.userId}. What would you like to do?`,
         options: [
-          { value: "continue", label: "Continue with existing data" },
-          { value: "relogin", label: "Log out and sign in as a different admin" },
-          { value: "cancel", label: "Cancel — exit setup" },
+          { value: "continue", label: "Create new bot" },
+          { value: "relogin", label: "Login as different admin" },
+          { value: "newserver", label: "Connect a server" },
+          { value: "delete", label: "Delete account data" },
+          { value: "cancel", label: "Exit" },
         ],
       });
 
@@ -276,8 +323,34 @@ export async function runSetup(): Promise<void> {
         p.outro(color.dim("Setup aborted."));
         return;
       }
-      if (action === "relogin") {
-        adminAuth = null;
+      if (action === "delete") {
+        p.note(`To delete account data, visit:\n${color.cyan(DOC_LINK)}`, "Delete account data");
+        p.outro(color.dim("Setup aborted."));
+        return;
+      }
+      if (action === "newserver") {
+        rcUrl = await promptServerUrl(rcUrl);
+        const match = allAccounts.find((a) => a.serverUrl === rcUrl);
+        if (match) {
+          p.log.info(
+            `An account for ${color.cyan(rcUrl)} already exists (@${match.mentionNames[0] ?? match.auth.userId}).`,
+          );
+          const reuse = await promptConfirm({
+            message: "Reuse the existing configuration for this server?",
+            initialValue: true,
+          });
+          if (reuse) {
+            adminAuth = await resolveAdminAuth(rcUrl);
+          } else {
+            adminAuth = await resolveAdminAuth(rcUrl, true);
+          }
+        } else {
+          adminAuth = await resolveAdminAuth(rcUrl, true);
+        }
+      } else if (action === "relogin") {
+        adminAuth = await resolveAdminAuth(rcUrl, true);
+      } else if (action === "continue") {
+        adminAuth = await resolveAdminAuth(rcUrl);
       }
     }
   }
@@ -395,7 +468,9 @@ export async function runSetup(): Promise<void> {
         `memory is isolated per-bot via session keys, but shares the main agent workspace.`,
     );
   } else if (agentResult.created) {
-    p.log.success(`agent — ${agentResult.agentId} (auto-created dedicated agent '${agentResult.agentId}')`);
+    p.log.success(
+      `agent — ${agentResult.agentId} (auto-created dedicated agent '${agentResult.agentId}')`,
+    );
   } else {
     p.log.success(`agent — ${agentResult.agentId}`);
   }
@@ -460,12 +535,12 @@ async function verifyExistingBot(
     }
   }
 
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= 3; attempt++) {
     const botPassword = await promptPassword({
       message:
         attempt === 1
           ? `Password for existing bot @${botUsername}`
-          : `Wrong password — re-enter for @${botUsername} (${2 - attempt + 1} attempt left)`,
+          : `Wrong password — re-enter for @${botUsername} (${3 - attempt} attempt${3 - attempt === 1 ? "" : "s"} left)`,
       validate: (value) => (value ? undefined : "Password is required"),
     });
     const auth = await loginForServer(rcUrl, botUsername, botPassword, botUsername);
@@ -486,6 +561,12 @@ async function createNewBot(
   adminAuth: RCLoginResult,
   botUsername: string,
 ): Promise<RCLoginResult | null> {
+  const limitCheck = checkBotCreationLimit("cli", { serverUrl: rcUrl });
+  if (!limitCheck.allowed) {
+    p.log.error(limitCheck.reason ?? "Bot creation limit reached.");
+    return null;
+  }
+
   const botName = await promptText({ message: "Bot display name", defaultValue: botUsername });
   const botEmail = await promptText({
     message: "Bot email",
@@ -508,6 +589,7 @@ async function createNewBot(
     }
   });
   if (!botUser) return null;
+  recordBotCreation(botUsername, "cli");
   p.log.success(
     `Created bot ${color.cyan(`@${botUser.username}`)} ${color.dim(`(${botUser._id})`)}`,
   );

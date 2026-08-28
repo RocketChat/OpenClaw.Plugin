@@ -10,6 +10,7 @@ import {
   isConfigured,
   activeClients,
 } from "./service/gateway.js";
+import { collectBotUsernamesForServer } from "./cli/config-updater.js";
 import type { ResolvedAccount } from "./types.js";
 
 export { startGateway, resolveAccount, listAccountIds, isConfigured };
@@ -109,6 +110,7 @@ export const rocketchatPlugin = createChatChannelPlugin<ResolvedAccount>({
         let client = entry?.client ?? null;
         if (!client) {
           client = new RocketChatClient({ serverUrl: account.serverUrl, auth: account.auth });
+          client.setBotUsernames(collectBotUsernamesForServer(account.serverUrl));
         }
         const tmidOptions = ctx.replyToId ? { tmid: ctx.replyToId } : undefined;
         const messageId = await client.postMessage(ctx.to, ctx.text, tmidOptions);
@@ -129,6 +131,7 @@ export const rocketchatPlugin = createChatChannelPlugin<ResolvedAccount>({
         let client = entry?.client ?? null;
         if (!client) {
           client = new RocketChatClient({ serverUrl: account.serverUrl, auth: account.auth });
+          client.setBotUsernames(collectBotUsernamesForServer(account.serverUrl));
         }
         const tmidOptions = ctx.replyToId ? { tmid: ctx.replyToId } : undefined;
 

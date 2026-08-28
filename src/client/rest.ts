@@ -7,6 +7,7 @@ import {
   resolveUrl,
   getExt,
   getErrorMessage,
+  stripBotMentions,
 } from "../utils.js";
 import { isPrivateOrLoopbackHost } from "openclaw/plugin-sdk/ssrf-runtime";
 
@@ -46,6 +47,7 @@ export class RocketChatClient {
   private identity: RocketChatIdentity | null = null;
   private resolvedUserId: string | null = null;
   private resolvedAuthToken: string | null = null;
+  private botUsernames: Set<string> = new Set();
 
   constructor(options: RocketChatClientOptions) {
     this.serverUrl = options.serverUrl.replace(/\/+$/, "");
@@ -57,6 +59,10 @@ export class RocketChatClient {
       this.resolvedUserId = this.auth.userId;
       this.resolvedAuthToken = this.auth.accessToken;
     }
+  }
+
+  setBotUsernames(names: Set<string>): void {
+    this.botUsernames = names;
   }
 
   async initialize(): Promise<void> {
@@ -102,11 +108,12 @@ export class RocketChatClient {
   }
 
   async postMessage(roomId: string, text: string, options?: { tmid?: string }): Promise<string> {
+    const sanitized = this.botUsernames.size > 0 ? stripBotMentions(text, this.botUsernames) : text;
     try {
-      return await this.postMessageRaw(roomId, text, options);
+      return await this.postMessageRaw(roomId, sanitized, options);
     } catch (err) {
       if (err instanceof RocketChatClientError && err.message.includes("/message/md")) {
-        return await this.postMessageRaw(roomId, stripMarkdown(text), options);
+        return await this.postMessageRaw(roomId, stripMarkdown(sanitized), options);
       }
       throw err;
     }
@@ -285,20 +292,32 @@ export class RocketChatClient {
   }
 
   private async requestJson(url: URL, init: RequestInit): Promise<JsonObject> {
-    await this.ensureInitialized();
-    const signal = init.signal ?? AbortSignal.timeout(15_000);
-    const response = await this.fetchFn(url.toString(), {
-      ...init,
-      signal,
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        "X-User-Id": this.resolvedUserId!,
-        "X-Auth-Token": this.resolvedAuthToken!,
-        ...((init.headers as Record<string, string>) ?? {}),
-      },
-    });
-    return this.parseJsonResponse(response);
+    const maxRetries = 3;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      await this.ensureInitialized();
+      const signal = init.signal ?? AbortSignal.timeout(15_000);
+      const response = await this.fetchFn(url.toString(), {
+        ...init,
+        signal,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          "X-User-Id": this.resolvedUserId!,
+          "X-Auth-Token": this.resolvedAuthToken!,
+          ...((init.headers as Record<string, string>) ?? {}),
+        },
+      });
+      try {
+        return await this.parseJsonResponse(response);
+      } catch (err: unknown) {
+        if (err instanceof RocketChatRateLimitError && attempt < maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, err.retryAfterMs));
+          continue;
+        }
+        throw err;
+      }
+    }
+    throw new RocketChatClientError("Rate limit retries exhausted");
   }
 
   private async parseJsonResponse(response: Response): Promise<JsonObject> {
