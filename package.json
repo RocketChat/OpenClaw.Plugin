@@ -10,7 +10,7 @@
   },
   "type": "module",
   "scripts": {
-    "build": "pnpm run manifest && tsc",
+    "build": "rm -rf dist && pnpm run manifest && tsc",
     "manifest": "tsx scripts/gen-manifest.mts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

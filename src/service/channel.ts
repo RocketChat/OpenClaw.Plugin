@@ -185,9 +185,9 @@ function buildHelpText(showAll: boolean): string {
       "Bot",
       [
         ["help", "this menu"],
-        ["status", "gateway / bot / agent / runtime"],
-        ["bots", "bots + their agents"],
-        ["groups", "groups joined"],
+        ["status", "Checkout openclaw gateway status"],
+        ["bots", "bots and agents"],
+        ["groups", "groups joined by bots"],
         ["access", "who can use"],
         ["add-bot <user>", "create a bot"],
         ["remove-bot <user...>", "delete bot(s)"],
@@ -210,7 +210,7 @@ function buildHelpText(showAll: boolean): string {
     [
       "Behavior",
       [
-        ["think <level>", "depth: off..high"],
+        ["think <level>", "off, low, medium, high"],
         ["abort", "stop reply"],
         ["reasoning on/off", "show reasoning"],
         ["verbose on/off", "debug details"],
