@@ -2,7 +2,7 @@
   "id": "rocketchat",
   "name": "Rocket.Chat",
   "description": "Rocket.Chat channel plugin with DDP/websocket outbound/inbound",
-  "version": "1.0.1",
+  "version": "1.0.6",
   "kind": "channel",
   "channels": [
     "rocketchat"

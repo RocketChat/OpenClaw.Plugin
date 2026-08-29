@@ -4,8 +4,11 @@ import { DM_SCOPE } from "../utils.js";
 import { RocketChatClient } from "../client/rest.js";
 import type { RCLoginResult } from "../types.js";
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
+
+const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 import {
   readAllAccounts,
   readBindingsForAccount,
@@ -185,7 +188,7 @@ function buildHelpText(showAll: boolean): string {
       "Bot",
       [
         ["help", "this menu"],
-        ["status", "Checkout openclaw gateway status"],
+        ["status", "gateway status"],
         ["bots", "bots and agents"],
         ["groups", "groups joined by bots"],
         ["access", "who can use"],
@@ -206,7 +209,7 @@ function buildHelpText(showAll: boolean): string {
         ["new [model]", "fresh start"],
       ],
     ],
-    ["Model", [["model [name|#]", "list or switch"]]],
+    ["Model", [["model", "show current + list"], ["model <name>", "switch model"]]],
     [
       "Behavior",
       [
@@ -226,18 +229,29 @@ function buildHelpText(showAll: boolean): string {
     ],
   ];
 
-  const lines: string[] = ["Commands"];
-  for (const [title, cmds] of groups) {
-    const visible = showAll
-      ? cmds
-      : cmds.filter(([cmd]) => !OWNER_ONLY_COMMANDS.has(cmd.split(/\s/)[0]!));
-    if (visible.length === 0) continue;
-    lines.push("", `**${title}**`);
-    for (const [cmd, desc] of visible) {
-      lines.push(`\`!${cmd}\` ${desc}`);
+  const visibleGroups = groups
+    .map(
+      ([title, cmds]) =>
+        [
+          title,
+          showAll ? cmds : cmds.filter(([cmd]) => !OWNER_ONLY_COMMANDS.has(cmd.split(/\s/)[0]!)),
+        ] as [string, Array<[string, string]>],
+    )
+    .filter(([, cmds]) => cmds.length > 0);
+
+  const pad = (s: string, n: number): string => s + " ".repeat(Math.max(0, n - s.length));
+  const width = Math.max(0, ...visibleGroups.flatMap(([, cmds]) => cmds.map(([cmd]) => cmd.length)));
+
+  const lines: string[] = ["Rocket.Chat bot commands:"];
+  for (const [title, cmds] of visibleGroups) {
+    lines.push("", title);
+    for (const [cmd, desc] of cmds) {
+      lines.push(`  ${pad("!" + cmd, width + 1)}  ${desc}`);
     }
   }
-  return lines.join("\n");
+  if (!showAll) lines.push("", "owner-only commands hidden - run as owner to see");
+  lines.push("", "Tip: run !skill <name> to use a skill");
+  return "```\n" + lines.join("\n") + "\n```";
 }
 
 function runBots(): string {
@@ -275,6 +289,28 @@ function parseSkillFrontmatter(content: string): { name?: string; description?: 
   return result;
 }
 
+/**
+ * Skills listed in `.skillsignore` (plugin root) are hidden from the `!skills`
+ * menu. One name per line; `#` starts a comment. Editing the file needs no rebuild
+ * of plugin logic — only a gateway restart to re-read it.
+ */
+function loadHiddenSkills(): Set<string> {
+  const file = resolve(PLUGIN_ROOT, ".skillsignore");
+  const hidden = new Set<string>();
+  try {
+    if (!existsSync(file)) return hidden;
+    const content = readFileSync(file, "utf8");
+    for (const raw of content.split("\n")) {
+      const line = raw.trim();
+      if (!line || line.startsWith("#")) continue;
+      hidden.add(line);
+    }
+  } catch {
+    // ignore — show all skills if the ignore file can't be read
+  }
+  return hidden;
+}
+
 function runSkills(): string {
   const skillsDir = resolve(homedir(), ".openclaw", "skills");
   if (!existsSync(skillsDir)) {
@@ -288,6 +324,7 @@ function runSkills(): string {
       return false;
     }
   });
+  const hidden = loadHiddenSkills();
   const skills: Array<{ name: string; description: string }> = [];
   for (const name of entries) {
     const skillMd = resolve(skillsDir, name, "SKILL.md");
@@ -300,14 +337,16 @@ function runSkills(): string {
     }
     const fm = parseSkillFrontmatter(content);
     if (!fm.name) continue;
+    if (hidden.has(fm.name) || hidden.has(name)) continue;
     skills.push({ name: fm.name, description: fm.description ?? "" });
   }
   if (skills.length === 0) {
     return "No skills installed (expected at ~/.openclaw/skills).";
   }
-  const lines = ["**Skills**"];
+  const cap = (s: string, n = 80): string => (s.length > n ? s.slice(0, n).trimEnd() + "…" : s);
+  const lines = ["Skills"];
   for (const s of skills) {
-    lines.push(`- \`!skill ${s.name}\`${s.description ? ` - ${s.description}` : ""}`);
+    lines.push(`- \`!skill ${s.name}\`${s.description ? ` - ${cap(s.description)}` : ""}`);
   }
   lines.push("", "Run a skill: `!skill <name>`");
   return lines.join("\n");
@@ -426,16 +465,8 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
   const username = positional[0];
   if (!username) {
     return [
-      "**Create a new bot user**",
-      'Usage: `!add-bot <username> [--name "..."] [--email ...] [--agent <id>]`',
-      "",
-      "Examples:",
-      "  `!add-bot alice` - quick create; auto-creates a dedicated agent `rc-alice`",
-      '  `!add-bot alice --name "Alice Smith" --email alice@example.com --agent support`',
-      "",
-      "By default each bot gets its own dedicated agent (`rc-<username>`), so memory is isolated. " +
-        "Pass `--agent <id>` to bind the bot to an existing shared agent instead (e.g. `main`, `work`).",
-      "",
+      'Usage: !add-bot <username> [--name "..."] [--email ...] [--agent <id>]',
+      "Creates a bot with its own agent (rc-<username>); --agent binds a shared one.",
       "A random password is generated and shown once. The bot comes online automatically.",
     ].join("\n");
   }

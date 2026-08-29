@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import JSON5 from "json5";
 import type { AuthCredentials, JsonObject } from "../types.js";
 
-const OC_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
+export const OC_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
 
 export type TokenAuth = Extract<AuthCredentials, { mode: "token" }>;
 
@@ -25,6 +25,7 @@ export type ExistingAccount = {
   serverUrl: string;
   mentionNames: string[];
   auth: TokenAuth;
+  enabled: boolean;
   owner?: string;
 };
 
@@ -73,17 +74,31 @@ export function readAccount(accountId = "main"): ExistingAccount | null {
     : [];
   const owner =
     typeof account.owner === "string" && account.owner.length > 0 ? account.owner : undefined;
+  const enabled = account.enabled !== false;
   return {
     accountId,
     serverUrl,
     mentionNames,
     auth: { mode: "token", userId: auth.userId, accessToken: auth.accessToken },
+    enabled,
     ...(owner ? { owner } : {}),
   };
 }
 
 function normalizeMention(name: string): string {
   return name.trim().replace(/^@+/, "");
+}
+
+export function setAccountEnabled(accountId: string, enabled: boolean): boolean {
+  const cfg = readConfig() as Record<string, any>;
+  const accounts = cfg?.channels?.rocketchat?.accounts as Record<string, any> | undefined;
+  if (!accounts || typeof accounts !== "object") return false;
+  const target = accountId.toLowerCase();
+  const key = Object.keys(accounts).find((k) => k.toLowerCase() === target);
+  if (!key || typeof accounts[key] !== "object" || accounts[key] === null) return false;
+  accounts[key].enabled = enabled;
+  writeConfig(cfg);
+  return true;
 }
 
 export function updateConfig(opts: {

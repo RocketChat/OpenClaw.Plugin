@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { resolveOpenClawDir, extractQuotedMessageId, DM_SCOPE } from "../utils.js";
 import { RocketChatClient } from "../client/rest.js";
 import { parsePluginConfig } from "../config/schema.js";
@@ -283,17 +284,77 @@ function reformatTools(text: string): string {
     .trim();
 }
 
+function reformatModel(text: string): string {
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let current = "";
+  const models: string[] = [];
+  const NOISE = /^(Auth overview|OAuth|Providers|Profiles|Aliases|Fallbacks|Image model|Image fallbacks|Shell env|Config\s)/i;
+  const AUTH =
+    /models\.json|openclaw-agent\.sqlite|effective=|source=|api_key=|oauth=|token=/i;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (NOISE.test(line) || AUTH.test(line)) continue;
+    const cur = line.match(/^(?:Current|Default)\s*:\s*(\S+)/i);
+    if (cur) {
+      current = shortModelId(cur[1]!);
+      continue;
+    }
+    const listMatch = line.match(/^Configured models\s*\(?\d*\)?:\s*(.+)$/i);
+    if (listMatch) {
+      for (const m of listMatch[1]!.split(",")) {
+        const t = m.trim();
+        if (t) models.push(shortModelId(t));
+      }
+      continue;
+    }
+    if (/^[\w.\-]+\/[\w.\-]+(?:\/[\w.\-]+)*$/.test(line) || /^-\s+[\w.\-]+\//.test(line)) {
+      models.push(shortModelId(line.replace(/^-\s+/, "")));
+      continue;
+    }
+  }
+  if (current) out.push(`Current: ${current}`);
+  if (models.length) {
+    out.push("", "Available:");
+    for (const m of models) out.push(`  ${m}`);
+  }
+  return out.length ? out.join("\n") : text;
+}
+
 function reformatCommandReply(command: string | null, text: string): string {
   if (!command || !text) return text;
   let out = text.replace(OPENCLAW_CMD_RE, "!$1");
-  // Tidy the model card: show a short model id on the Current line.
+  // Tidy the model card: keep the current model + a clean available list.
   if (command.startsWith("/model")) {
-    out = out.replace(/^Current:\s*(\S+)/m, (_m, id: string) => `Current: ${shortModelId(id)}`);
+    const modelArg = command.replace(/^\/model\s*/i, "").trim().toLowerCase();
+    const wantsList = modelArg === "" || modelArg === "status" || modelArg === "list";
+    if (wantsList) {
+      try {
+        const cli = execFileSync("openclaw", ["models"], {
+          encoding: "utf8",
+          timeout: 8000,
+        });
+        out = reformatModel(cli);
+      } catch {
+        out = reformatModel(out);
+      }
+    } else {
+      out = reformatModel(out);
+    }
   }
   if (command.startsWith("/tools")) {
     out = reformatTools(out);
   }
+  out = stripEmojis(out);
   return out;
+}
+
+const EMOJI_RE =
+  /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{1F1E6}-\u{1F1FF}\u{FE00}-\u{FE0F}\u{2190}-\u{21FF}\u{2300}-\u{23FF}\u{2460}-\u{24FF}\u{25A0}-\u{25FF}\u{2900}-\u{297F}\u{2022}\u{00B7}]/gu;
+
+function stripEmojis(text: string): string {
+  return text.replace(EMOJI_RE, "").replace(/[ \t]{2,}/g, " ").trim();
 }
 
 async function sendReply(
@@ -542,6 +603,7 @@ async function startDdpGateway(
           serverUrl: account.serverUrl,
           mentionNames: account.mentionNames,
           auth: { mode: "token", userId: "", accessToken: "" },
+          enabled: true,
           ...(account.owner ? { owner: account.owner } : {}),
         },
         client,
@@ -750,16 +812,6 @@ function mapRoomType(t: string | undefined): InboundEvent["roomType"] {
   return "channel";
 }
 
-const PROCESSING_EMOJIS = [
-  ":eyes:",
-  ":thinking:",
-  ":hourglass:",
-  ":gear:",
-  ":robot:",
-  ":arrows_counterclockwise:",
-  ":bulb:",
-  ":mag:",
-];
 
 function dedupeMentions(mentions: string[]): string[] {
   return [...new Set(mentions.map((mention) => mention.trim()).filter(Boolean))];
@@ -775,3 +827,14 @@ function parseChannelConfig(cfg: OpenClawConfig): ReturnType<typeof parsePluginC
 function isPluginConfigLike(input: unknown): input is Parameters<typeof parsePluginConfig>[0] {
   return Boolean(input && typeof input === "object" && "accounts" in input);
 }
+
+const PROCESSING_EMOJIS = [
+  ":eyes:",
+  ":thinking:",
+  ":hourglass:",
+  ":gear:",
+  ":robot:",
+  ":arrows_counterclockwise:",
+  ":bulb:",
+  ":mag:",
+];
