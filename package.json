@@ -1,6 +1,6 @@
 {
-  "name": "@rocketchat/openclaw-plugin",
-  "version": "1.0.0",
+  "name": "@kartik.doda/openclaw-plugin-test",
+  "version": "1.0.1",
   "description": "A fully unified plugin for integrating Rocket.Chat with OpenClaw. This plugin eliminates the need for an external bridging server, providing a direct, single-place architecture for inbounds, outbounds, session management, and CLI configuration.",
   "main": "dist/index.js",
   "openclaw": {
@@ -34,6 +34,8 @@
     "url": "https://github.com/RocketChat/OpenClaw.Plugin/issues"
   },
   "homepage": "https://github.com/RocketChat/OpenClaw.Plugin#readme",
+  "files": ["dist", "README.md"],
+  "publishConfig": { "access": "public" },
   "devDependencies": {
     "@clack/core": "1.4.3",
     "@types/node": "^25.9.1",

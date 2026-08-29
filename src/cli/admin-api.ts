@@ -2,6 +2,27 @@ import { RocketChatClientError } from "../client/rest.js";
 import { getErrorMessage } from "../utils.js";
 import type { RCLoginResult, RCUser, JsonObject } from "../types.js";
 
+const REQUEST_TIMEOUT_MS = 15_000;
+
+export function isTimeoutError(e: unknown): boolean {
+  return (
+    e instanceof DOMException &&
+    (e.name === "TimeoutError" || e.name === "AbortError")
+  );
+}
+
+function fetchWithTimeout(
+  url: string | URL,
+  init: RequestInit = {},
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() =>
+    clearTimeout(timer),
+  );
+}
+
 function extractRecord(json: JsonObject, field: string): Record<string, unknown> {
   const value = json[field];
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -36,7 +57,7 @@ async function adminFetch(
     headers["X-Auth-Token"] = opts.authToken;
     headers["X-User-Id"] = opts.userId;
   }
-  const res = await fetch(new URL(path, baseUrl), {
+  const res = await fetchWithTimeout(new URL(path, baseUrl), {
     method: opts.method ?? "POST",
     headers,
     ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
@@ -326,7 +347,9 @@ export async function inviteToGroup(
 
 export async function checkServerHealth(baseUrl: string): Promise<boolean> {
   try {
-    const res = await fetch(new URL("/api/info", baseUrl), { method: "GET" });
+    const res = await fetchWithTimeout(new URL("/api/info", baseUrl), {
+      method: "GET",
+    });
     return res.ok;
   } catch {
     return false;

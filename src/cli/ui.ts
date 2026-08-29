@@ -159,13 +159,13 @@ export async function promptTwoFactorCode(opts: {
 }): Promise<string> {
   const isEmail = (opts.method ?? "totp") === "email";
   const methodHint = opts.method && opts.method !== "totp" ? ` (${opts.method})` : "";
-  const value = await p.text({
-    message:
-      opts.message ??
-      (isEmail
-        ? "Email verification code (check your inbox)"
-        : `Two-factor authentication code${methodHint}`),
-    placeholder: isEmail ? "from email" : "123456",
+  const message =
+    opts.message ??
+    (isEmail
+      ? "Email verification code (check your inbox)"
+      : `Two-factor authentication code${methodHint}`);
+  const value = await promptPassword({
+    message,
     validate: (v) => {
       const trimmed = (v ?? "").trim();
       if (!trimmed) return opts.allowEmpty ? undefined : "Code is required";
@@ -173,8 +173,7 @@ export async function promptTwoFactorCode(opts: {
       return undefined;
     },
   });
-  handleCancel(value);
-  return (value as string).replace(/\s+/g, "");
+  return value.replace(/\s+/g, "");
 }
 
 export async function promptConfirm(opts: Parameters<typeof p.confirm>[0]): Promise<boolean> {
@@ -227,13 +226,17 @@ export function printNextSteps(steps: string[]): void {
   p.note(steps.map((s, i) => `${color.dim(`${i + 1}.`)} ${s}`).join("\n"), "Next steps");
 }
 
-export async function showServerStatus(url: string, check: () => Promise<boolean>): Promise<void> {
+export async function showServerStatus(
+  url: string,
+  check: () => Promise<boolean>,
+): Promise<boolean> {
   const online = await check();
   if (online) {
     p.log.success(`Rocket.Chat server: ${color.green("online")} (${color.dim(url)})`);
   } else {
     p.log.error(`Rocket.Chat server: ${color.red("offline")} (${color.dim(url)})`);
   }
+  return online;
 }
 
 export { p as prompts, color };

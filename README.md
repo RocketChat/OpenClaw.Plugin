@@ -11,10 +11,8 @@ A [OpenClaw](https://opencode.ai) channel plugin that connects [Rocket.Chat](htt
 Install the plugin:
 
 ```bash
-openclaw plugins install <plugin-package>
+openclaw plugins install @rocketchat/openclaw-plugin
 ```
-
-> This plugin will soon be published to npm. Once the official package is available you'll install it the same way — the setup steps below remain identical.
 
 ## Setup
 
@@ -85,11 +83,12 @@ Send these in a DM to the bot, or @-mention the bot with the command in a group.
 |---|---|
 | `!help` | Show the command menu. |
 | `!status` | OpenClaw-side status: gateway, bot, agent, runtime. |
+| `!bots` | List all configured bot accounts and their agent bindings. |
+| `!groups` | List groups/channels the bot has joined. |
 | `!access` | Who is allowed to use the bot. |
 | `!add-bot <user>` | Create a new bot account + dedicated agent. |
 | `!remove-bot <user...>` | Delete bot account(s). |
 | `!add-group <group> [bot]` | Invite a bot into a group. |
-| `!kick <user> [group]` | Remove a user from a group. |
 | `!lend <group\|dm> <user>` | Grant access to a group or DM. |
 | `!revoke <group\|dm> <user>` | Revoke access. |
 
