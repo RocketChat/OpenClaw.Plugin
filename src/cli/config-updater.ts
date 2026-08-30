@@ -1,7 +1,6 @@
-import { existsSync, readFileSync, writeFileSync, renameSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, renameSync, readdirSync, rmSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
-import { execFileSync } from "node:child_process";
 import JSON5 from "json5";
 import type { AuthCredentials, JsonObject } from "../types.js";
 
@@ -36,6 +35,32 @@ export function readAllAccounts(): ExistingAccount[] {
   return Object.keys(accounts)
     .map((id) => readAccount(id))
     .filter((a): a is ExistingAccount => a !== null);
+}
+
+export type ChannelLimits = {
+  maxAccounts?: number;
+  maxBotsPerServer?: number;
+  botCreationCooldownMs?: number;
+  maxReconnects?: number;
+  maxConcurrentTurns?: number;
+};
+
+export function readChannelLimits(): ChannelLimits {
+  const cfg = readConfig() as Record<string, any>;
+  const limits = cfg?.channels?.rocketchat?.limits;
+  if (!limits || typeof limits !== "object") return {};
+  const out: ChannelLimits = {};
+  if (typeof limits.maxAccounts === "number" && limits.maxAccounts > 0)
+    out.maxAccounts = limits.maxAccounts;
+  if (typeof limits.maxBotsPerServer === "number" && limits.maxBotsPerServer > 0)
+    out.maxBotsPerServer = limits.maxBotsPerServer;
+  if (typeof limits.botCreationCooldownMs === "number" && limits.botCreationCooldownMs > 0)
+    out.botCreationCooldownMs = limits.botCreationCooldownMs;
+  if (typeof limits.maxReconnects === "number" && limits.maxReconnects > 0)
+    out.maxReconnects = limits.maxReconnects;
+  if (typeof limits.maxConcurrentTurns === "number" && limits.maxConcurrentTurns > 0)
+    out.maxConcurrentTurns = limits.maxConcurrentTurns;
+  return out;
 }
 
 export function collectBotUserIdsForServer(serverUrl: string): Set<string> {
@@ -169,34 +194,35 @@ export function updateConfig(opts: {
 }
 
 export function readAgentsList(): Array<{ id: string; name?: string }> {
-  // OpenClaw 2026+ stores agents as directories under ~/.openclaw/agents/
+  const cfg = readConfig() as Record<string, any>;
+  const list = cfg?.agents?.list;
+  const agents: Array<{ id: string; name?: string }> = [];
+
+  if (Array.isArray(list)) {
+    for (const a of list) {
+      if (!a || typeof a !== "object") continue;
+      const id = typeof a.id === "string" ? a.id : "";
+      if (!id) continue;
+      const name = typeof a.name === "string" ? a.name : undefined;
+      agents.push(name !== undefined ? { id, name } : { id });
+    }
+  }
+
   const agentsDir = resolve(homedir(), ".openclaw", "agents");
   if (existsSync(agentsDir)) {
     try {
       const entries = readdirSync(agentsDir, { withFileTypes: true });
-      return entries.filter((e) => e.isDirectory()).map((e) => ({ id: e.name }));
+      for (const e of entries) {
+        if (!e.isDirectory()) continue;
+        if (agents.some((a) => a.id === e.name)) continue;
+        agents.push({ id: e.name });
+      }
     } catch {
       // fall through
     }
   }
 
-  // Fallback: agents.list array in config
-  const cfg = readConfig() as Record<string, any>;
-  const list = cfg?.agents?.list;
-  if (Array.isArray(list)) {
-    return list
-      .filter((a: unknown) => a && typeof a === "object")
-      .map((a: Record<string, unknown>) => {
-        const id = typeof a.id === "string" ? a.id : "";
-        const name = typeof a.name === "string" ? a.name : undefined;
-        const result: { id: string; name?: string } = { id };
-        if (name !== undefined) result.name = name;
-        return result;
-      })
-      .filter((a) => a.id.length > 0);
-  }
-
-  return [];
+  return agents;
 }
 
 export function readBindingsForAccount(
@@ -263,23 +289,46 @@ export function ensureAgentForBot(accountId: string): {
   agentId: string;
   created: boolean;
   fallback: boolean;
+  reason?: string;
 } {
   const dedicatedId = `rc-${accountId}`;
-  const existing = readAgentsList();
-  if (existing.some((a) => a.id === dedicatedId)) {
+  if (readAgentsList().some((a) => a.id === dedicatedId)) {
     return { agentId: dedicatedId, created: false, fallback: false };
   }
 
   try {
     const workspace = resolve(homedir(), ".openclaw", "agents", dedicatedId);
-    execFileSync(
-      "openclaw",
-      ["agents", "add", dedicatedId, "--non-interactive", "--workspace", workspace],
-      { stdio: "ignore" },
-    );
+    mkdirSync(resolve(workspace, "agent"), { recursive: true });
+    mkdirSync(resolve(workspace, "sessions"), { recursive: true });
+
+    const stateFile = resolve(workspace, "openclaw-workspace-state.json");
+    if (!existsSync(stateFile)) {
+      writeFileSync(
+        stateFile,
+        JSON.stringify({ version: 1, bootstrapSeededAt: new Date().toISOString() }, null, 2) + "\n",
+      );
+    }
+
+    const cfg = readConfig() as Record<string, any>;
+    if (!cfg.agents) cfg.agents = {};
+    if (!Array.isArray(cfg.agents.list)) cfg.agents.list = [];
+    if (!cfg.agents.list.some((a: any) => a?.id === dedicatedId)) {
+      cfg.agents.list.push({
+        id: dedicatedId,
+        name: dedicatedId,
+        workspace,
+        agentDir: resolve(workspace, "agent"),
+      });
+    }
+    writeConfig(cfg);
     return { agentId: dedicatedId, created: true, fallback: false };
-  } catch {
-    return { agentId: "main", created: false, fallback: true };
+  } catch (err) {
+    return {
+      agentId: "main",
+      created: false,
+      fallback: true,
+      reason: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 

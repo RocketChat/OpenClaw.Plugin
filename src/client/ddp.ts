@@ -8,8 +8,8 @@ export type RocketChatDdpConnectionOptions = {
   wsUrl: string;
   authToken: string;
   username: string;
-  reconnectDelayMs?: number;
-  maxReconnects?: number;
+  reconnectDelayMs?: number | undefined;
+  maxReconnects?: number | undefined;
   onMessage: (message: RocketChatMessageRecord) => void;
   onStatus?: (status: DdpStatus) => void;
   onError?: (error: Error) => void;

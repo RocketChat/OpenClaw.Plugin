@@ -53,9 +53,9 @@ export interface BotCreationLimit {
 export function checkBotCreationLimit(
   source: "cli" | "inline",
   options?: {
-    maxAccounts?: number;
-    maxBotsPerServer?: number;
-    cooldownMs?: number;
+    maxAccounts?: number | undefined;
+    maxBotsPerServer?: number | undefined;
+    cooldownMs?: number | undefined;
     serverUrl?: string;
   },
 ): BotCreationLimit {

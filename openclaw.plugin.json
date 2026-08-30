@@ -133,28 +133,29 @@
             "type": "object",
             "properties": {
               "maxAccounts": {
-                "default": 10,
                 "type": "integer",
                 "exclusiveMinimum": 0,
-                "maximum": 9007199254740991
+                "maximum": 50
               },
               "maxBotsPerServer": {
-                "default": 5,
                 "type": "integer",
                 "exclusiveMinimum": 0,
-                "maximum": 9007199254740991
+                "maximum": 25
               },
               "botCreationCooldownMs": {
-                "default": 60000,
                 "type": "integer",
-                "exclusiveMinimum": 0,
+                "minimum": 5000,
                 "maximum": 9007199254740991
               },
               "maxReconnects": {
-                "default": 20,
                 "type": "integer",
                 "exclusiveMinimum": 0,
-                "maximum": 9007199254740991
+                "maximum": 100
+              },
+              "maxConcurrentTurns": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 32
               }
             },
             "additionalProperties": false

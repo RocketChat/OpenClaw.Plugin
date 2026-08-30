@@ -3,6 +3,7 @@ import {
   getUserInfo,
 } from "./admin-api.js";
 import { checkBotCreationLimit, recordBotCreation } from "./rate-limiter.js";
+import { readChannelLimits } from "./config-updater.js";
 import { saveBotCredentials, loadBotCredentials } from "./credentials.js";
 import {
   color,
@@ -91,7 +92,13 @@ async function createNewBot(
   adminAuth: RCLoginResult,
   botUsername: string,
 ): Promise<RCLoginResult | null> {
-  const limitCheck = checkBotCreationLimit("cli", { serverUrl: rcUrl });
+  const limits = readChannelLimits();
+  const limitCheck = checkBotCreationLimit("cli", {
+    serverUrl: rcUrl,
+    maxAccounts: limits.maxAccounts,
+    maxBotsPerServer: limits.maxBotsPerServer,
+    cooldownMs: limits.botCreationCooldownMs,
+  });
   if (!limitCheck.allowed) {
     p.log.error(limitCheck.reason ?? "Bot creation limit reached.");
     return null;

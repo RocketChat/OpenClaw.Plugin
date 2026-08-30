@@ -45,10 +45,11 @@ export const pluginConfigSchema = z
     accounts: z.record(z.string().min(1), accountSchema),
     limits: z
       .object({
-        maxAccounts: z.number().int().positive().default(10).optional(),
-        maxBotsPerServer: z.number().int().positive().default(5).optional(),
-        botCreationCooldownMs: z.number().int().positive().default(60_000).optional(),
-        maxReconnects: z.number().int().positive().default(20).optional(),
+        maxAccounts: z.number().int().positive().max(50).optional(),
+        maxBotsPerServer: z.number().int().positive().max(25).optional(),
+        botCreationCooldownMs: z.number().int().positive().min(5000).optional(),
+        maxReconnects: z.number().int().positive().max(100).optional(),
+        maxConcurrentTurns: z.number().int().positive().min(1).max(32).optional(),
       })
       .strict()
       .optional(),

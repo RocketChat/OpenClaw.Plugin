@@ -84,6 +84,11 @@ export type CommandContext = {
   senderName?: string;
   roomId?: string;
   roomType?: import("../types.js").InboundEvent["roomType"];
+  limits?: {
+    maxAccounts?: number | undefined;
+    maxBotsPerServer?: number | undefined;
+    botCreationCooldownMs?: number | undefined;
+  };
 };
 
 export type CommandResult =
@@ -264,13 +269,14 @@ function runBots(): string {
   for (const account of accounts) {
     const mention = account.mentionNames[0] ?? account.accountId;
     const bindings = readBindingsForAccount(account.accountId);
+    const disabled = account.enabled === false ? " (disabled)" : "";
     if (bindings.length === 0) {
-      lines.push(`- ${mention} - (no agent bound)`);
+      lines.push(`- ${mention}${disabled} - (no agent bound)`);
       continue;
     }
     for (const binding of bindings) {
-      const scope = binding.peer ? `${binding.peer.kind} ${binding.peer.id}` : "global";
-      lines.push(`- ${mention} → ${binding.agentId} (${scope})`);
+      const agent = binding.agentId === `rc-${mention}` ? "" : ` → ${binding.agentId}`;
+      lines.push(`- ${mention}${disabled}${agent}`);
     }
   }
 
@@ -483,18 +489,19 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
     const result = ensureAgentForBot(username);
     agent = result.agentId;
     if (result.fallback) {
-      return [
-        `Created bot ${username}, but could not auto-create a dedicated agent.`,
-        `Falling back to 'main' - memory is isolated per-bot via session keys, but the bot shares the main agent workspace.`,
-      ].join("\n");
-    }
-    if (result.created) {
+      agentNote = ` (agent auto-creation failed: ${result.reason ?? "unknown error"} - bound to 'main'; memory is still isolated per-bot via session keys)`;
+    } else if (result.created) {
       agentNote = ` (auto-created dedicated agent '${agent}')`;
     }
   }
 
   try {
-    const limitCheck = checkBotCreationLimit("inline", { serverUrl: ctx.account.serverUrl });
+    const limitCheck = checkBotCreationLimit("inline", {
+      serverUrl: ctx.account.serverUrl,
+      maxAccounts: ctx.limits?.maxAccounts,
+      maxBotsPerServer: ctx.limits?.maxBotsPerServer,
+      cooldownMs: ctx.limits?.botCreationCooldownMs,
+    });
     if (!limitCheck.allowed) {
       return limitCheck.reason ?? "Bot creation limit reached.";
     }
@@ -848,14 +855,14 @@ async function removeSingleBot(
     removeAgentDir(username);
   }
 
-  const lines = [
-    `- ${username}: ${serverNote}`,
-    `  OpenClaw config account + agent binding removed.`,
+  const trims = [
+    serverNote,
+    "account+binding removed",
     ownsDedicatedAgent
-      ? `  Agent workspace \`rc-${username}\` removed.`
-      : `  Kept shared agent \`${boundAgent}\` (bot was not its owner).`,
-  ];
-  return { removed: true, text: lines.join("\n") };
+      ? `workspace \`rc-${username}\` removed`
+      : `kept shared agent \`${boundAgent}\``,
+  ].join(", ");
+  return { removed: true, text: `- ${username}: ${trims}` };
 }
 
 async function runAddGroup(ctx: CommandContext, argStr: string): Promise<string> {

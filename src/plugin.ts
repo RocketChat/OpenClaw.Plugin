@@ -9,6 +9,7 @@ import {
   listAccountIds,
   isConfigured,
   activeClients,
+  lookupThreadRoot,
 } from "./service/gateway.js";
 import { collectBotUsernamesForServer } from "./cli/config-updater.js";
 import type { ResolvedAccount } from "./types.js";
@@ -112,7 +113,8 @@ export const rocketchatPlugin = createChatChannelPlugin<ResolvedAccount>({
           client = new RocketChatClient({ serverUrl: account.serverUrl, auth: account.auth });
           client.setBotUsernames(collectBotUsernamesForServer(account.serverUrl));
         }
-        const tmidOptions = ctx.replyToId ? { tmid: ctx.replyToId } : undefined;
+        const tmid = ctx.replyToId ? (lookupThreadRoot(ctx.replyToId) ?? ctx.replyToId) : undefined;
+        const tmidOptions = tmid ? { tmid } : undefined;
         const messageId = await client.postMessage(ctx.to, ctx.text, tmidOptions);
         return { channel: "rocketchat", ok: true, messageId };
       },
@@ -133,7 +135,8 @@ export const rocketchatPlugin = createChatChannelPlugin<ResolvedAccount>({
           client = new RocketChatClient({ serverUrl: account.serverUrl, auth: account.auth });
           client.setBotUsernames(collectBotUsernamesForServer(account.serverUrl));
         }
-        const tmidOptions = ctx.replyToId ? { tmid: ctx.replyToId } : undefined;
+        const tmid = ctx.replyToId ? (lookupThreadRoot(ctx.replyToId) ?? ctx.replyToId) : undefined;
+        const tmidOptions = tmid ? { tmid } : undefined;
 
         const urls = ctx.mediaUrl ? [ctx.mediaUrl] : [];
         if (!urls.length) {
