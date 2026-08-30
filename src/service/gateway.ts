@@ -375,6 +375,28 @@ function stripEmojis(text: string): string {
   return text.replace(EMOJI_RE, "").replace(/[ \t]{2,}/g, " ").trim();
 }
 
+const SEND_RETRY_DELAY_MS = 500;
+
+export async function postMessageWithRetry(
+  client: Pick<RocketChatClient, "postMessage">,
+  accountId: string,
+  roomId: string,
+  text: string,
+  tmid?: string,
+): Promise<string> {
+  const tmidOpt = tmid ? { tmid } : undefined;
+  try {
+    return await client.postMessage(roomId, text, tmidOpt);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    logger.info(
+      `[rocketchat:${accountId}] send failed, retrying in ${SEND_RETRY_DELAY_MS}ms: ${reason}`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, SEND_RETRY_DELAY_MS));
+    return await client.postMessage(roomId, text, tmidOpt);
+  }
+}
+
 async function sendReply(
   client: RocketChatClient,
   ddp: RocketChatDdpConnection | null,
@@ -406,7 +428,8 @@ async function sendReply(
     await ddp?.sendTyping(roomId, false).catch(() => {});
   }
 
-  const sendMsg = client.postMessage.bind(client);
+  const sendMsg = (roomId: string, text: string, options?: { tmid?: string }) =>
+    postMessageWithRetry(client, accountId, roomId, text, options?.tmid);
   const tmidOpt = replyTmid ? { tmid: replyTmid } : undefined;
   logger.info(`[rocketchat:${accountId}] reply tmid=${replyTmid ?? "none"} text="${text.slice(0, 60)}"`);
 
@@ -558,6 +581,11 @@ async function startDdpGateway(
     maxReconnects: channelLimits?.maxReconnects,
     onStatus: (status) => {
       connectionStatus.set(accountId, status);
+      if (status === "failed") {
+        logger.error(
+          `[rocketchat:${accountId}] connection gave up - bot is dead until daemon restart (run: openclaw daemon restart)`,
+        );
+      }
       logger.info(`[rocketchat:${accountId}] ddp status: ${status}`);
     },
     onError: (error) => logger.error(`[rocketchat:${accountId}] ddp error: ${error.message}`),
@@ -612,12 +640,10 @@ async function startDdpGateway(
       if (
         isSenderDenied(event.senderName, account.owner, accountId, event.roomId, event.roomType)
       ) {
-        const sendCmd = client.postMessage.bind(client);
-        const tmidOpt = event.tmid ? { tmid: event.tmid } : undefined;
         const ownerLabel = account.owner ? `@${account.owner}` : "the bot owner";
         const replyText = `You don't have access to use this bot. Contact ${ownerLabel}.`;
         try {
-          await sendCmd(event.roomId, replyText, tmidOpt);
+          await postMessageWithRetry(client, accountId, event.roomId, replyText, event.tmid ?? undefined);
         } catch (err) {
           logger.error(
             `[rocketchat:${accountId}] access denied reply failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -656,10 +682,14 @@ async function startDdpGateway(
         `[rocketchat:${accountId}] matchCommand(${JSON.stringify(event.text)}) -> ${cmdResult.action}`,
       );
       if (cmdResult.action === "reply") {
-        const sendCmd = client.postMessage.bind(client);
-        const tmidOpt = event.tmid ? { tmid: event.tmid } : undefined;
         try {
-          await sendCmd(event.roomId, cmdResult.replyText, tmidOpt);
+          await postMessageWithRetry(
+            client,
+            accountId,
+            event.roomId,
+            cmdResult.replyText,
+            event.tmid ?? undefined,
+          );
         } catch (err) {
           logger.error(
             `[rocketchat:${accountId}] command reply failed: ${err instanceof Error ? err.message : String(err)}`,

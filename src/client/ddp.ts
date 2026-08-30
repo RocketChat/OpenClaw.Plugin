@@ -2,7 +2,7 @@ import { DDPSDK } from "@rocket.chat/ddp-client";
 import type { RocketChatMessageRecord } from "../types.js";
 import { DEFAULT_MAX_RECONNECTS } from "../cli/rate-limiter.js";
 
-export type DdpStatus = "connecting" | "connected" | "ready" | "closed";
+export type DdpStatus = "connecting" | "connected" | "ready" | "closed" | "failed";
 
 export type RocketChatDdpConnectionOptions = {
   wsUrl: string;
@@ -86,6 +86,7 @@ export class RocketChatDdpConnection {
         if (!this.stopped) {
           this.reconnectAttempts++;
           if (this.reconnectAttempts > maxReconnects) {
+            this.options.onStatus?.("failed");
             this.options.onError?.(
               new Error(
                 `Max reconnect attempts (${maxReconnects}) exceeded for ${this.options.wsUrl}`,

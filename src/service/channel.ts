@@ -270,13 +270,14 @@ function runBots(): string {
     const mention = account.mentionNames[0] ?? account.accountId;
     const bindings = readBindingsForAccount(account.accountId);
     const disabled = account.enabled === false ? " (disabled)" : "";
+    const dead = connectionStatus.get(account.accountId) === "failed" ? " (dead)" : "";
     if (bindings.length === 0) {
-      lines.push(`- ${mention}${disabled} - (no agent bound)`);
+      lines.push(`- ${mention}${disabled}${dead} - (no agent bound)`);
       continue;
     }
     for (const binding of bindings) {
       const agent = binding.agentId === `rc-${mention}` ? "" : ` → ${binding.agentId}`;
-      lines.push(`- ${mention}${disabled}${agent}`);
+      lines.push(`- ${mention}${disabled}${dead}${agent}`);
     }
   }
 
