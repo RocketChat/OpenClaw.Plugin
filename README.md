@@ -1,13 +1,5 @@
 # Rocket.Chat Plugin for OpenClaw
 
-> [!IMPORTANT]
-> **Do not use the `npm i @kartik.doda/openclaw-plugin-test` command shown in npm's sidebar.**
-> This is an OpenClaw plugin, not a regular npm dependency. Install it with the OpenClaw CLI so it is registered and tracked correctly:
->
-> ```bash
-> openclaw plugins install npm:@kartik.doda/openclaw-plugin-test
-> ```
-
 A [OpenClaw](https://opencode.ai) channel plugin that connects [Rocket.Chat](https://rocket.chat) directly — **no external bridge server**. The plugin speaks to Rocket.Chat over a real-time **WebSocket/DDP** connection for both inbound and outbound traffic, and routes messages into OpenClaw's agent runtime.
 
 - Inbound: real-time DDP stream, deduplicated via an on-disk checkpoint, filtered (bot's own messages, system events, empty/duplicate messages), and dispatched to the agent.
