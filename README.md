@@ -19,7 +19,7 @@ A [OpenClaw](https://opencode.ai) channel plugin that connects [Rocket.Chat](htt
 Install the plugin:
 
 ```bash
-openclaw plugins install npm:@kartik.doda/openclaw-plugin-test
+openclaw plugins install clawhub:@dodaa08/openclaw-plugin-test
 ```
 
 ## Setup
