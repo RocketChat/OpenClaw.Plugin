@@ -126,6 +126,29 @@ export function setAccountEnabled(accountId: string, enabled: boolean): boolean 
   return true;
 }
 
+/** Set the default model for all agents (agents.defaults.model.primary). */
+export function setDefaultModel(modelId: string): void {
+  const cfg = readConfig() as Record<string, any>;
+  if (!cfg.agents) cfg.agents = {};
+  if (!cfg.agents.defaults) cfg.agents.defaults = {};
+  const current = cfg.agents.defaults.model;
+  const existing =
+    typeof current === "object" && current && typeof (current as { fallbacks?: unknown }).fallbacks === "object"
+      ? { fallbacks: (current as { fallbacks: unknown }).fallbacks }
+      : {};
+  cfg.agents.defaults.model = { primary: modelId, ...existing };
+  writeConfig(cfg);
+}
+
+/** Read the current default model (primary) for all agents. */
+export function readDefaultModel(): string {
+  const cfg = readConfig() as Record<string, any>;
+  const raw = cfg?.agents?.defaults?.model;
+  if (typeof raw === "string") return raw;
+  if (raw && typeof raw === "object") return String(raw.primary ?? "");
+  return "";
+}
+
 export function updateConfig(opts: {
   pluginPath: string;
   pluginId: string;

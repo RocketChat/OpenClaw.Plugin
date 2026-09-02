@@ -10,6 +10,9 @@ import { homedir } from "node:os";
 
 const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 import {
+  readConfig,
+  readDefaultModel,
+  setDefaultModel,
   readAllAccounts,
   readBindingsForAccount,
   readOwner,
@@ -33,14 +36,55 @@ import {
   getUserInfo,
   inviteToGroup,
   listGroupMembers,
+  type RocketChatGroup,
 } from "../cli/admin-api.js";
 import { checkBotCreationLimit, recordBotCreation } from "../cli/rate-limiter.js";
 import { loadAdmin } from "../cli/credentials.js";
 import { startGateway } from "./gateway.js";
 import { activeClients, connectionStatus } from "./runtime-state.js";
 import { AccessStore } from "../config/access-store.js";
+import {
+  runCronCommand,
+  runEmailCommand,
+  runConfigureCommand,
+  CRON_USAGE,
+  CRON_HEADING,
+  EMAIL_USAGE,
+  EMAIL_HEADING,
+  CONFIGURE_USAGE,
+  CONFIGURE_HEADING,
+} from "./skill-commands.js";
 
 const BROADCAST_MENTIONS = new Set(["here", "all", "everyone"]);
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Normalize a room name for comparison: optional leading #, trimmed, lowercased. */
+function normalizeRoomName(name: string): string {
+  return name.replace(/^#+/, "").trim().toLowerCase();
+}
+
+function groupNotFoundText(groupName: string, reasons?: string[]): string {
+  if ((reasons ?? []).some((r) => /discussion/i.test(r))) {
+    return `Group "${groupName}" is a discussion. Lending/inviting bots in discussions isn't supported yet — coming soon.`;
+  }
+
+  const forbidden = (reasons ?? []).some((r) =>
+    /not.authorized|not-authorized|forbidden|permission|not.member|not.allowed/i.test(r),
+  );
+
+  let hint: string;
+  if (forbidden) {
+    hint =
+      "exists but requires permission — this usually happens with private groups where the acting account isn't a member or lacks permission";
+  } else {
+    hint =
+      "not found — this could be a private group the acting account isn't a member of, or a discussion (will be supported soon)";
+  }
+  return `Group "${groupName}" ${hint}.`;
+}
 
 export function shouldHandleInboundEvent(
   event: InboundEvent,
@@ -70,7 +114,11 @@ export function shouldHandleInboundEvent(
 
   const normalizedText = event.text.toLowerCase();
   for (const alias of aliases) {
-    if (normalizedText.includes(`@${alias}`)) return true;
+    // Match the alias as a whole word (e.g. "@ocrcbot") so that a mention of a
+    // different bot does not match a prefix alias (@ocrcbot2 must not match @ocrcbot).
+    if (new RegExp(`(^|[^\\w])@${escapeRegex(alias)}(?![\\w])`, "i").test(normalizedText)) {
+      return true;
+    }
   }
 
   return false;
@@ -92,7 +140,7 @@ export type CommandContext = {
 };
 
 export type CommandResult =
-  | { action: "reply"; replyText: string }
+  | { action: "reply"; replyText: string; command?: string }
   | { action: "passthrough" }
   | { action: "openclaw-command"; command: string };
 
@@ -110,6 +158,8 @@ const OWNER_ONLY_COMMANDS = new Set([
   "revoke",
   "access",
   "bots",
+  "email",
+  "configure",
 ]);
 
 function isOwner(ctx: CommandContext): boolean {
@@ -128,7 +178,15 @@ export async function matchCommand(text: string, ctx: CommandContext): Promise<C
   if (!match) return { action: "passthrough" };
   const cmd = match[1]!.toLowerCase();
   const argStr = match[2] ?? "";
+  const result = await runCommand(cmd, argStr, ctx);
+  return result.action === "reply" ? { ...result, command: cmd } : result;
+}
 
+async function runCommand(
+  cmd: string,
+  argStr: string,
+  ctx: CommandContext,
+): Promise<CommandResult> {
   if (OWNER_ONLY_COMMANDS.has(cmd) && !isOwner(ctx)) {
     return {
       action: "reply",
@@ -164,13 +222,40 @@ export async function matchCommand(text: string, ctx: CommandContext): Promise<C
     case "new":
       return { action: "openclaw-command", command: `/new${argStr ? " " + argStr : ""}` };
     case "model":
-      return { action: "openclaw-command", command: `/model${argStr ? " " + argStr : ""}` };
+      return await runModel(argStr);
     case "tools":
       return { action: "openclaw-command", command: `/tools${argStr ? " " + argStr : ""}` };
-    case "skill":
+    case "skill": {
+      const skillName = argStr.trim().split(/\s+/)[0] ?? "";
+      const owner = isOwner(ctx);
+      if (skillName.toLowerCase() === "cron") {
+        return { action: "reply", replyText: [CRON_HEADING, CRON_USAGE].join("\n") };
+      }
+      if (
+        (skillName.toLowerCase() === "email" || skillName.toLowerCase() === "configure") &&
+        !owner
+      ) {
+        return {
+          action: "reply",
+          replyText: `\`!skill ${skillName}\` is owner-only. Contact ${ctx.account.owner ? `@${ctx.account.owner}` : "the bot owner"}.`,
+        };
+      }
+      if (skillName.toLowerCase() === "email") {
+        return { action: "reply", replyText: [EMAIL_HEADING, EMAIL_USAGE].join("\n") };
+      }
+      if (skillName.toLowerCase() === "configure") {
+        return { action: "reply", replyText: [CONFIGURE_HEADING, CONFIGURE_USAGE].join("\n") };
+      }
       return { action: "openclaw-command", command: `/skill${argStr ? " " + argStr : ""}` };
+    }
     case "skills":
-      return { action: "reply", replyText: runSkills() };
+      return { action: "reply", replyText: runSkills(isOwner(ctx)) };
+    case "cron":
+      return { action: "reply", replyText: await runCronCommand(ctx, argStr) };
+    case "email":
+      return { action: "reply", replyText: await runEmailCommand(ctx, argStr) };
+    case "configure":
+      return { action: "reply", replyText: runConfigureCommand() };
     case "think":
       return { action: "openclaw-command", command: `/think${argStr ? " " + argStr : ""}` };
     case "abort":
@@ -214,7 +299,13 @@ function buildHelpText(showAll: boolean): string {
         ["new [model]", "fresh start"],
       ],
     ],
-    ["Model", [["model", "show current + list"], ["model <name>", "switch model"]]],
+    [
+      "Model",
+      [
+        ["model", "show current + list"],
+        ["model set <name>", "switch model"],
+      ],
+    ],
     [
       "Behavior",
       [
@@ -245,7 +336,10 @@ function buildHelpText(showAll: boolean): string {
     .filter(([, cmds]) => cmds.length > 0);
 
   const pad = (s: string, n: number): string => s + " ".repeat(Math.max(0, n - s.length));
-  const width = Math.max(0, ...visibleGroups.flatMap(([, cmds]) => cmds.map(([cmd]) => cmd.length)));
+  const width = Math.max(
+    0,
+    ...visibleGroups.flatMap(([, cmds]) => cmds.map(([cmd]) => cmd.length)),
+  );
 
   const lines: string[] = ["Rocket.Chat bot commands:"];
   for (const [title, cmds] of visibleGroups) {
@@ -255,8 +349,106 @@ function buildHelpText(showAll: boolean): string {
     }
   }
   if (!showAll) lines.push("", "owner-only commands hidden - run as owner to see");
-  lines.push("", "Tip: run !skill <name> to use a skill");
   return "```\n" + lines.join("\n") + "\n```";
+}
+
+function shortModelId(full: string): string {
+  return full.split("/").pop() ?? full;
+}
+
+function getUsableModels(): { current: string; usable: string[] } {
+  const defaults = (readConfig() as Record<string, any>)?.agents?.defaults as
+    Record<string, any> | undefined;
+  const models = (defaults?.models ?? {}) as Record<string, unknown>;
+  const usable = Object.keys(models)
+    .filter(Boolean)
+    .sort((a, b) => {
+      const ka = shortModelId(a).toLowerCase();
+      const kb = shortModelId(b).toLowerCase();
+      return ka.localeCompare(kb) || a.localeCompare(b);
+    });
+  return { current: readDefaultModel(), usable };
+}
+
+function shortIdCounts(usable: string[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const m of usable) {
+    const s = shortModelId(m);
+    counts.set(s, (counts.get(s) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function modelLabel(full: string, usable: string[]): string {
+  const s = shortModelId(full);
+  const counts = shortIdCounts(usable);
+  return (counts.get(s) ?? 0) > 1 ? full : s;
+}
+
+function matchingModels(requested: string, usable: string[]): string[] {
+  const q = requested.trim().toLowerCase();
+  if (!q) return [];
+  return usable.filter((m) => m.toLowerCase() === q || shortModelId(m).toLowerCase() === q);
+}
+
+async function runModel(argStr: string): Promise<CommandResult> {
+  const trimmed = argStr.trim();
+  const { current, usable } = getUsableModels();
+
+  if (trimmed) {
+    const requested = /^set\b/i.test(trimmed) ? trimmed.replace(/^set\b/i, "").trim() : trimmed;
+    const matches = matchingModels(requested, usable);
+    if (matches.length === 0) {
+      return {
+        action: "reply",
+        replyText: `Unknown model \`${requested}\`. Run \`!model\` to see the usable models.`,
+      };
+    }
+    if (matches.length > 1) {
+      return {
+        action: "reply",
+        replyText:
+          `\`${requested}\` matches multiple models. Use one of the full ids: ` +
+          matches.map((m) => `\`${m}\``).join(", "),
+      };
+    }
+    const target = matches[0]!;
+    if (target === current) {
+      return {
+        action: "reply",
+        replyText: `Already on \`${modelLabel(target, usable)}\`.`,
+      };
+    }
+    setDefaultModel(target);
+    return {
+      action: "reply",
+      replyText:
+        `Switched model to \`${modelLabel(target, usable)}\`.\n` +
+        "The new default is saved. Start a fresh turn (\`!new\`) for it to apply.",
+    };
+  }
+
+  if (usable.length === 0) {
+    return {
+      action: "reply",
+      replyText: "No usable models found. Configure providers in openclaw.json first.",
+    };
+  }
+
+  const lines = [
+    "**Model**",
+    current ? `- current - ${modelLabel(current, usable)}` : "- current - (not set)",
+    "",
+    "**Usable**",
+    ...usable.map((m) => {
+      const label = modelLabel(m, usable);
+      const mark = current && current === m ? " (current)" : "";
+      return `- \`${label}\`${mark}`;
+    }),
+    "",
+    "Switch: `!model set <name>`",
+  ];
+  return { action: "reply", replyText: lines.join("\n") };
 }
 
 function runBots(): string {
@@ -264,7 +456,6 @@ function runBots(): string {
   if (accounts.length === 0) {
     return "No Rocket.Chat bot accounts configured.";
   }
-
   const lines: string[] = [];
   for (const account of accounts) {
     const mention = account.mentionNames[0] ?? account.accountId;
@@ -318,7 +509,7 @@ function loadHiddenSkills(): Set<string> {
   return hidden;
 }
 
-function runSkills(): string {
+function runSkills(showOwnerOnly: boolean): string {
   const skillsDir = resolve(homedir(), ".openclaw", "skills");
   if (!existsSync(skillsDir)) {
     return "No skills installed (expected at ~/.openclaw/skills).";
@@ -351,11 +542,23 @@ function runSkills(): string {
     return "No skills installed (expected at ~/.openclaw/skills).";
   }
   const cap = (s: string, n = 80): string => (s.length > n ? s.slice(0, n).trimEnd() + "…" : s);
-  const lines = ["Skills"];
-  for (const s of skills) {
-    lines.push(`- \`!skill ${s.name}\`${s.description ? ` - ${cap(s.description)}` : ""}`);
+  const lines = ["**Skills**"];
+  const has = (name: string): boolean => skills.some((s) => s.name === name);
+  lines.push("", CRON_HEADING, CRON_USAGE);
+  if (showOwnerOnly) {
+    if (has("email") || has("agentmail")) {
+      lines.push("", EMAIL_HEADING, EMAIL_USAGE);
+    }
+    lines.push("", CONFIGURE_HEADING, CONFIGURE_USAGE);
   }
-  lines.push("", "Run a skill: `!skill <name>`");
+  for (const s of skills) {
+    if (s.name === "cron" || s.name === "email" || s.name === "agentmail") continue;
+    if (!showOwnerOnly && s.name === "configure") continue;
+    const title = s.name.charAt(0).toUpperCase() + s.name.slice(1);
+    lines.push("", `**${title}**`);
+    lines.push(`• ${s.description ? cap(s.description) : "No description available."}`);
+    lines.push(`• Run with: \`!skill ${s.name}\``);
+  }
   return lines.join("\n");
 }
 
@@ -390,15 +593,14 @@ async function runAccess(ctx: CommandContext): Promise<string> {
   if (grants.length === 0) {
     lines.push("No grants. Only the owner can use the bot.");
   } else {
-    // Group grants per user so a user with both group + DM access shows on one line.
     const byUser = new Map<string, string[]>();
     for (const grant of grants) {
       const scope =
         grant.roomId === "*"
-          ? "everywhere (group + dm)"
+          ? "everywhere"
           : grant.roomId === DM_SCOPE
             ? "dm"
-            : `group: #${grant.roomName ?? grant.roomId}`;
+            : `#${grant.roomName ?? grant.roomId}`;
       const list = byUser.get(grant.username) ?? [];
       list.push(scope);
       byUser.set(grant.username, list);
@@ -425,6 +627,68 @@ async function adminAuthForServer(serverUrl: string, ctx: CommandContext): Promi
   const admin = await loadAdmin(serverUrl);
   if (admin) return { userId: admin.userId, authToken: admin.authToken };
   return adminAuth(ctx);
+}
+
+/**
+ * Resolve a group/channel by name on the Rocket.Chat server. Private rooms
+ * (`groups.info`) are deliberately hidden from callers that are not members and
+ * lack `view-room-administration`, so an insufficient credential produces a false
+ * "not found" even though the room exists. Tries the admin credential, then the
+ * bot's own token (it is a member of its rooms), then the bot's own
+ * subscriptions — which list private rooms it belongs to. Reasons are appended
+ * to `reasons` when a lookup fails, so callers can tell "missing" from "denied".
+ */
+async function resolveGroupByName(
+  ctx: CommandContext,
+  auth: RCLoginResult,
+  groupName: string,
+  reasons?: string[],
+): Promise<RocketChatGroup | null> {
+  let group = await getGroupByName(ctx.account.serverUrl, auth, groupName, reasons);
+  if (group) return group;
+  const botAuth = adminAuth(ctx);
+  if (botAuth.userId !== auth.userId) {
+    group = await getGroupByName(ctx.account.serverUrl, botAuth, groupName, reasons);
+  }
+  if (group) return group;
+  return resolveGroupFromSubscriptions(ctx, groupName, reasons);
+}
+
+/** Find a subscribed room (private or public) by name via the bot's own subscriptions. */
+async function resolveGroupFromSubscriptions(
+  ctx: CommandContext,
+  groupName: string,
+  reasons?: string[],
+): Promise<RocketChatGroup | null> {
+  const normalized = normalizeRoomName(groupName);
+  try {
+    const subs = await ctx.client.listSubscriptions(null);
+    const match = subs.find(
+      (s) =>
+        s.rid &&
+        !s.prid &&
+        (s.t === "p" || s.t === "c") &&
+        s.name !== undefined &&
+        normalizeRoomName(s.name) === normalized,
+    );
+    if (match) {
+      return { _id: match.rid, name: match.name ?? groupName, isPrivate: match.t === "p" };
+    }
+    const disc = subs.find(
+      (s) =>
+        s.rid &&
+        s.prid &&
+        (normalizeRoomName(s.name ?? "") === normalized ||
+          normalizeRoomName(s.fname ?? "") === normalized),
+    );
+    if (disc) {
+      reasons?.push("/api/v1/subscriptions.get: discussion");
+      return null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /** Parse `key value --flag value` style args into a positional list + flags map. */
@@ -668,8 +932,9 @@ async function runLend(ctx: CommandContext, argStr: string): Promise<string> {
     let roomId: string;
     let roomName: string;
     if (groupName) {
-      const group = await getGroupByName(ctx.account.serverUrl, auth, groupName);
-      if (!group) return `Group "${groupName}" not found.`;
+      const reasons: string[] = [];
+      const group = await resolveGroupByName(ctx, auth, groupName, reasons);
+      if (!group) return groupNotFoundText(groupName, reasons);
       roomId = group._id;
       roomName = group.name;
     } else {
@@ -740,10 +1005,28 @@ async function runRevoke(ctx: CommandContext, argStr: string): Promise<string> {
     let roomId: string;
     let roomName: string;
     if (groupName) {
-      const group = await getGroupByName(ctx.account.serverUrl, auth, groupName);
-      if (!group) return `Group "${groupName}" not found.`;
-      roomId = group._id;
-      roomName = group.name;
+      const reasons: string[] = [];
+      const group = await resolveGroupByName(ctx, auth, groupName, reasons);
+      if (group) {
+        roomId = group._id;
+        roomName = group.name;
+      } else {
+        // The group can't be resolved via the API (private room with insufficient
+        // credentials, archived, renamed, or deleted). Fall back to the persisted
+        // grant, which carries the same roomName that `!access` displays.
+        const store = new AccessStore();
+        const grants = store.loadGrants(ctx.accountId);
+        store.close();
+        const match = grants.find(
+          (g) =>
+            g.username.toLowerCase() === cleanUser.toLowerCase() &&
+            g.roomName !== undefined &&
+            normalizeRoomName(g.roomName) === normalizeRoomName(groupName),
+        );
+        if (!match) return groupNotFoundText(groupName, reasons);
+        roomId = match.roomId;
+        roomName = match.roomName ?? groupName;
+      }
     } else {
       roomId = DM_SCOPE;
       roomName = "direct";
@@ -886,8 +1169,9 @@ async function runAddGroup(ctx: CommandContext, argStr: string): Promise<string>
       return `${botName} exists on the server but is not configured in OpenClaw. Use \`!add-bot ${botName}\` to set it up.`;
     }
 
-    const group = await getGroupByName(ctx.account.serverUrl, auth, groupName);
-    if (!group) return `Group/channel "#${groupName}" not found.`;
+    const reasons: string[] = [];
+    const group = await resolveGroupByName(ctx, auth, groupName, reasons);
+    if (!group) return groupNotFoundText(`#${groupName}`, reasons);
 
     const isPrivate = group.isPrivate;
 
@@ -900,7 +1184,11 @@ async function runAddGroup(ctx: CommandContext, argStr: string): Promise<string>
     try {
       await inviteToGroup(ctx.account.serverUrl, auth, group._id, botName, isPrivate);
     } catch (e: unknown) {
-      return `Failed to add ${botName} to #${group.name}: ${e instanceof Error ? e.message : String(e)}`;
+      const err = e instanceof Error ? e.message : String(e);
+      const denied = /not.authorized|not-authorized|forbidden|permission/i.test(err);
+      return denied
+        ? `Can't add ${botName} to #${group.name}: the ${isPrivate ? "admin" : "acting"} account lacks invite permission for this ${isPrivate ? "private group" : "channel"}. Ensure that account is a member or has the right to invite (${err}).`
+        : `Failed to add ${botName} to #${group.name}: ${err}`;
     }
 
     return `Invited ${botName} to #${group.name}${isPrivate ? " (private group)" : " (channel)"}. The bot will start receiving messages there.`;

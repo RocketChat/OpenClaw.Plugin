@@ -16,7 +16,9 @@ import {
   isAgentBound,
   readAllAccounts,
   updateConfig,
+  type ExistingAccount,
 } from "./config-updater.js";
+import { loadAdmin } from "./credentials.js";
 import { resolveAdminAuth } from "./auth.js";
 import { resolveBotAuth } from "./bot.js";
 import {
@@ -101,6 +103,27 @@ async function promptAddToGroup(
   }
 }
 
+async function printLoggedInAccounts(): Promise<void> {
+  const admin = await loadAdmin();
+  if (!admin) return;
+
+  let adminUser = admin.userId;
+  try {
+    const info = await getUserInfo(admin.serverUrl, admin, { userId: admin.userId });
+    if (info?.username) adminUser = info.username;
+  } catch {
+    // fall back to the saved user id if the server is unreachable
+  }
+
+  p.note(
+    [
+      `  ${color.dim("admin")} @${adminUser}`,
+      `  ${color.dim("server")} ${admin.serverUrl}`,
+    ].join("\n"),
+    "Currently logged in",
+  );
+}
+
 export async function runSetup(): Promise<void> {
   p.intro(`${color.bgCyan(color.black(" OpenClaw "))} ${color.dim("×")} Rocket.Chat Setup`);
 
@@ -115,6 +138,9 @@ export async function runSetup(): Promise<void> {
   const uniqueServers = [...serversMap.entries()].map(([url, accs]) => ({ url, accounts: accs }));
 
   const hasExisting = uniqueServers.length > 0;
+  if (hasExisting) {
+    await printLoggedInAccounts();
+  }
 
   let action: string;
   if (hasExisting) {

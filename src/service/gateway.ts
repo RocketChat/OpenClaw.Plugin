@@ -16,8 +16,6 @@ import { collectBotUserIdsForServer, collectBotUsernamesForServer } from "../cli
 import { AccessStore } from "../config/access-store.js";
 import { appendGroupHistory, getAndClearGroupHistory } from "./group-history.js";
 import { dispatchInboundEventWithChannelRuntime } from "./inbound.js";
-import { createChannelRunQueue } from "openclaw/plugin-sdk/channel-lifecycle";
-import { acquireTurnSlot, releaseTurnSlot, setMaxConcurrentTurns } from "./turn-limiter.js";
 import type {
   ResolvedAccount,
   OpenClawConfig,
@@ -81,8 +79,38 @@ async function handleMessage(
   identityUsername: string,
   isCommand: boolean,
   commandText: string | null,
+  owner?: string,
 ): Promise<void> {
-  const replyTmid = event.tmid ?? undefined;
+  if (isSenderDenied(event.senderName, owner, accountId, event.roomId, event.roomType)) {
+    const ownerLabel = owner ? `@${owner}` : "the bot owner";
+    const replyText = `You don't have access to use this bot. Contact ${ownerLabel}.`;
+    try {
+      await postMessageWithRetry(
+        client,
+        accountId,
+        event.roomId,
+        replyText,
+        resolveReplyTmid({
+          roomType: event.roomType,
+          tmid: event.tmid ?? undefined,
+          messageId: event.messageId,
+          isCommand: true,
+        }),
+      );
+    } catch (err) {
+      logger.error(
+        `[rocketchat:${accountId}] access denied reply failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return;
+  }
+
+  const replyTmid = resolveReplyTmid({
+    roomType: event.roomType,
+    tmid: event.tmid ?? undefined,
+    messageId: event.messageId,
+    isCommand,
+  });
   const channelRuntime = ctx.channelRuntime;
   if (!channelRuntime) return;
 
@@ -303,28 +331,43 @@ function reformatTools(text: string): string {
 }
 
 function reformatModel(text: string): string {
+  try {
+    const cli = execFileSync("openclaw", ["models", "list", "--json"], {
+      encoding: "utf8",
+      timeout: 8000,
+    });
+    const parsed = JSON.parse(cli) as {
+      models?: Array<{ key: string; tags?: string[] }>;
+    };
+    const models = parsed.models;
+    if (Array.isArray(models) && models.length > 0) {
+      const current = models.find((m) => m.tags?.includes("default"));
+      const available = models.filter((m) => !m.tags?.includes("default"));
+      const out: string[] = [];
+      if (current) out.push(`Current: ${shortModelId(current.key)}`);
+      if (available.length) {
+        out.push("", "Available:");
+        for (const m of available) out.push(`  ${shortModelId(m.key)}`);
+      }
+      if (out.length) return out.join("\n");
+    }
+  } catch {
+    // fallback to regex filtering on raw text if JSON path fails
+  }
+
   const lines = text.split("\n");
   const out: string[] = [];
   let current = "";
   const models: string[] = [];
-  const NOISE = /^(Auth overview|OAuth|Providers|Profiles|Aliases|Fallbacks|Image model|Image fallbacks|Shell env|Config\s)/i;
-  const AUTH =
-    /models\.json|openclaw-agent\.sqlite|effective=|source=|api_key=|oauth=|token=/i;
+  const SENSITIVE =
+    /api[_-]?key|secret|password|oauth|token|credential|bearer|authorization/i;
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
-    if (NOISE.test(line) || AUTH.test(line)) continue;
+    if (SENSITIVE.test(line)) continue;
     const cur = line.match(/^(?:Current|Default)\s*:\s*(\S+)/i);
     if (cur) {
       current = shortModelId(cur[1]!);
-      continue;
-    }
-    const listMatch = line.match(/^Configured models\s*\(?\d*\)?:\s*(.+)$/i);
-    if (listMatch) {
-      for (const m of listMatch[1]!.split(",")) {
-        const t = m.trim();
-        if (t) models.push(shortModelId(t));
-      }
       continue;
     }
     if (/^[\w.\-]+\/[\w.\-]+(?:\/[\w.\-]+)*$/.test(line) || /^-\s+[\w.\-]+\//.test(line)) {
@@ -395,6 +438,20 @@ export async function postMessageWithRetry(
     await new Promise((resolve) => setTimeout(resolve, SEND_RETRY_DELAY_MS));
     return await client.postMessage(roomId, text, tmidOpt);
   }
+}
+
+export function resolveReplyTmid(params: {
+  roomType: string;
+  tmid?: string | undefined;
+  messageId: string;
+  isCommand: boolean;
+  command?: string | undefined;
+}): string | undefined {
+  if (params.tmid) return params.tmid;
+  if (!params.isCommand) return undefined;
+  if (params.roomType === "direct") return undefined;
+  if (params.command === "help") return undefined;
+  return params.messageId;
 }
 
 async function sendReply(
@@ -539,14 +596,6 @@ async function startDdpGateway(
   const reconnectDelayMs =
     account.transport.mode === "websocket" ? (account.transport.reconnectDelayMs ?? 2_000) : 2_000;
   const channelLimits = parseChannelConfig(ctx.cfg ?? {}).limits;
-  if (channelLimits?.maxConcurrentTurns) setMaxConcurrentTurns(channelLimits.maxConcurrentTurns);
-  const runQueue = createChannelRunQueue({
-    ...(ctx.abortSignal ? { abortSignal: ctx.abortSignal } : {}),
-    onError: (err) =>
-      logger.error(
-        `[rocketchat:${accountId}] run queue task failed: ${err instanceof Error ? err.message : String(err)}`,
-      ),
-  });
 
   const stateData = await checkpoint.read();
   const seenIds = new Set(stateData.recentMessageIds);
@@ -643,7 +692,18 @@ async function startDdpGateway(
         const ownerLabel = account.owner ? `@${account.owner}` : "the bot owner";
         const replyText = `You don't have access to use this bot. Contact ${ownerLabel}.`;
         try {
-          await postMessageWithRetry(client, accountId, event.roomId, replyText, event.tmid ?? undefined);
+          await postMessageWithRetry(
+            client,
+            accountId,
+            event.roomId,
+            replyText,
+            resolveReplyTmid({
+              roomType: event.roomType,
+              tmid: event.tmid ?? undefined,
+              messageId: event.messageId,
+              isCommand: true,
+            }),
+          );
         } catch (err) {
           logger.error(
             `[rocketchat:${accountId}] access denied reply failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -682,14 +742,15 @@ async function startDdpGateway(
         `[rocketchat:${accountId}] matchCommand(${JSON.stringify(event.text)}) -> ${cmdResult.action}`,
       );
       if (cmdResult.action === "reply") {
+        const tmid = resolveReplyTmid({
+          roomType: event.roomType,
+          tmid: event.tmid ?? undefined,
+          messageId: event.messageId,
+          isCommand: true,
+          command: cmdResult.command,
+        });
         try {
-          await postMessageWithRetry(
-            client,
-            accountId,
-            event.roomId,
-            cmdResult.replyText,
-            event.tmid ?? undefined,
-          );
+          await postMessageWithRetry(client, accountId, event.roomId, cmdResult.replyText, tmid);
         } catch (err) {
           logger.error(
             `[rocketchat:${accountId}] command reply failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -715,20 +776,18 @@ async function startDdpGateway(
 
       if (processingMessages.has(msg._id)) return;
       processingMessages.add(msg._id);
-      runQueue.enqueue(event.roomId, async () => {
-        await acquireTurnSlot();
-        try {
-          await handleMessage(
-            ctx,
-            event,
-            client,
-            connection,
-            accountId,
-            identity.username,
-            cmdResult.action === "openclaw-command",
-            cmdResult.action === "openclaw-command" ? event.text : null,
-          );
-        } catch (err) {
+      void handleMessage(
+        ctx,
+        event,
+        client,
+        connection,
+        accountId,
+        identity.username,
+        cmdResult.action === "openclaw-command",
+        cmdResult.action === "openclaw-command" ? event.text : null,
+        account.owner,
+      )
+        .catch(async (err) => {
           const reason = err instanceof Error ? err.message : String(err);
           logger.error(
             `[rocketchat:${accountId}] failed to handle message ${event.messageId}: ${reason}`,
@@ -741,11 +800,10 @@ async function startDdpGateway(
             failedAt: new Date().toISOString(),
             reason,
           });
-        } finally {
-          releaseTurnSlot();
+        })
+        .finally(() => {
           processingMessages.delete(msg._id);
-        }
-      });
+        });
     },
   });
 

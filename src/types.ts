@@ -25,6 +25,7 @@ export type RocketChatSubscriptionRecord = {
   name?: string;
   fname?: string;
   t?: string;
+  prid?: string;
   _updatedAt?: string;
   updatedAt?: string;
 };

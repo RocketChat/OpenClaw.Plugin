@@ -1,5 +1,13 @@
 # Rocket.Chat Plugin for OpenClaw
 
+> [!IMPORTANT]
+> **Do not use the `npm i @kartik.doda/openclaw-plugin-test` command shown in npm's sidebar.**
+> This is an OpenClaw plugin, not a regular npm dependency. Install it with the OpenClaw CLI so it is registered and tracked correctly:
+>
+> ```bash
+> openclaw plugins install npm:@kartik.doda/openclaw-plugin-test
+> ```
+
 A [OpenClaw](https://opencode.ai) channel plugin that connects [Rocket.Chat](https://rocket.chat) directly — **no external bridge server**. The plugin speaks to Rocket.Chat over a real-time **WebSocket/DDP** connection for both inbound and outbound traffic, and routes messages into OpenClaw's agent runtime.
 
 - Inbound: real-time DDP stream, deduplicated via an on-disk checkpoint, filtered (bot's own messages, system events, empty/duplicate messages), and dispatched to the agent.
@@ -11,7 +19,7 @@ A [OpenClaw](https://opencode.ai) channel plugin that connects [Rocket.Chat](htt
 Install the plugin:
 
 ```bash
-openclaw plugins install @rocketchat/openclaw-plugin
+openclaw plugins install npm:@kartik.doda/openclaw-plugin-test
 ```
 
 ## Setup
@@ -98,7 +106,8 @@ Send these in a DM to the bot, or @-mention the bot with the command in a group.
 | `!compact` | Compress conversation history. |
 | `!reset` | Wipe all context. |
 | `!new [model]` | Fresh session (optionally switch model). |
-| `!model [name\|#]` | List or switch the model. |
+| `!model` | Show current + list usable (configured) models. |
+| `!model set <name>` | Switch the model. |
 
 **Behavior**
 | Command | Description |
@@ -114,6 +123,36 @@ Send these in a DM to the bot, or @-mention the bot with the command in a group.
 | `!tools` | List the agent's tools. |
 | `!skills` | List installed skills. |
 | `!skill <name>` | Run a skill. |
+| `!configure` | Check skill setup and get setup steps (owner-only). |
+
+## Skills setup
+
+Some skills need credentials on the **gateway** (the OpenClaw server process). The plugin
+never hardcodes accounts — it reads them from the gateway's environment. Run `!configure`
+in a DM to see live setup status.
+
+**Email** — this needs one of:
+
+- **Send (via Agentmail):** set `AGENTMAIL_API_KEY` on the gateway.
+- **Send (via s-nail/SMTP):** set `EMAIL_SMTP_USER` + `EMAIL_SMTP_PASS` (optionally `EMAIL_FROM`),
+  **or** configure s-nail itself in `~/.mailrc` (an `mta=smtps://user@host` line plus `~/.netrc`
+  credentials for that SMTP host).
+- **Fetch (via fetch-emails):** set `GMAIL_APP_PASSWORD` (a Gmail app password) on the gateway,
+  or add an app-password file under `~/.config/gmail/`. Optionally set `GMAIL_ACCOUNT` to pick a
+  default account for `!email fetch <count>` without passing one.
+- **Summarize:** `!email summarize <count>` (max 10, owner-only) fetches the inbox and asks the
+  OpenClaw agent to write a concise summary. Uses the same fetch credentials as above.
+
+If a skill is not set up, `!email send` / `!email fetch` reply pointing you to `!configure` instead
+of failing mid-request. Cron needs no setup — it uses OpenClaw's own account config.
+
+**Cron** — one-shot reminders and repeating jobs, no setup:
+- `!cron <interval> <task>` — one-shot (30s | 5m | 2h | 1d), auto-deletes after running.
+- `!cron --every <interval> <task>` — repeat every interval until stopped (e.g. `!cron --every 1h check disk space`).
+- `!cron list` — list this bot's cron jobs. `!cron stop <name>` — stop a repeating job.
+
+Set the env vars in the gateway's service/launcher (e.g. the `Environment=` lines of its
+systemd unit) and restart so the gateway picks them up.
 
 ## Troubleshooting
 
@@ -122,6 +161,16 @@ Send these in a DM to the bot, or @-mention the bot with the command in a group.
 - **`runtime - unavailable`** — the agent runtime wasn't ready when the message arrived; restart OpenClaw and retry.
 - **Duplicate/replayed messages** — the plugin deduplicates via `~/.openclaw/rocketchat/<id>.db`; if you suspect staleness, that file is the checkpoint.
 
-## Learn more
+## Building from source
 
-- Blog: https://readyy.hashnode.dev/building-rocket-chat-channel-plugin-for-openclaw
+`@rocket.chat/ddp-client` is used only at build time — it is bundled into the shipped `dist/client/ddp.js` by esbuild and is **not** needed at runtime.
+
+It is deliberately **excluded** from `package.json`'s `devDependencies` because its transitive dependency `@rocket.chat/core-typings` / `@rocket.chat/ui-kit` declare `typia` via a yarn `patch:` spec that `npm` cannot resolve. Including it in the published manifest breaks `openclaw plugins install` (the managed install runs `npm install --omit=dev` and fails on the `patch:` URL).
+
+To rebuild locally, install it ad-hoc and then remove it before publishing:
+
+```bash
+pnpm add -D @rocket.chat/ddp-client@^1.1.1
+pnpm run build
+pnpm remove @rocket.chat/ddp-client
+```

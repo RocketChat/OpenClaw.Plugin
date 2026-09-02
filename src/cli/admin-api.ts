@@ -5,10 +5,7 @@ import type { RCLoginResult, RCUser, JsonObject } from "../types.js";
 const REQUEST_TIMEOUT_MS = 15_000;
 
 export function isTimeoutError(e: unknown): boolean {
-  return (
-    e instanceof DOMException &&
-    (e.name === "TimeoutError" || e.name === "AbortError")
-  );
+  return e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError");
 }
 
 function fetchWithTimeout(
@@ -18,9 +15,7 @@ function fetchWithTimeout(
 ): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  return fetch(url, { ...init, signal: controller.signal }).finally(() =>
-    clearTimeout(timer),
-  );
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
 }
 
 function extractRecord(json: JsonObject, field: string): Record<string, unknown> {
@@ -96,8 +91,7 @@ function parseLoginChallenge(json: JsonObject): LoginChallenge | null {
   // never sent (e.g. a bot account without 2FA provisioned).
   const explicitChallenge =
     /^(totp-required|code-required|email-required|totp-invalid|code-invalid)$/i.test(errorType) ||
-    (status === "error" &&
-      /(two-factor|verification code|2fa|totp|enter the code)/i.test(message));
+    (status === "error" && /(two-factor|verification code|2fa|totp|enter the code)/i.test(message));
 
   if (!explicitChallenge) return null;
 
@@ -310,6 +304,7 @@ export async function getGroupByName(
   baseUrl: string,
   auth: RCLoginResult,
   name: string,
+  reasons?: string[],
 ): Promise<RocketChatGroup | null> {
   for (const endpoint of ["/api/v1/groups.info", "/api/v1/channels.info"]) {
     try {
@@ -325,7 +320,9 @@ export async function getGroupByName(
       if (group?._id) {
         return { _id: group._id, name: group.name ?? name, isPrivate: group.t === "p" };
       }
-    } catch {}
+    } catch (e: unknown) {
+      reasons?.push(`${endpoint}: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
   return null;
 }
