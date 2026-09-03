@@ -280,7 +280,7 @@ function buildHelpText(showAll: boolean): string {
         ["groups", "groups joined by bots"],
         ["access", "who can use"],
         ["add-bot <user>", "create a bot"],
-        ["remove-bot <user...>", "delete bot(s); clears config, creds, agent — gateway auto-restarts; run `openclaw sessions cleanup` to purge old shared sessions"],
+        ["remove-bot <user...>", "delete bot(s); clears config, creds, agent\ngateway auto-restarts; run `openclaw sessions cleanup` for old sessions"],
         ["add-group <group> [bot]", "invite bot to group"],
         ["lend <group> <user>", "grant group access"],
         ["lend dm <user>", "grant DM access"],
@@ -338,11 +338,16 @@ function buildHelpText(showAll: boolean): string {
     ...visibleGroups.flatMap(([, cmds]) => cmds.map(([cmd]) => cmd.length)),
   );
 
+  const descIndent = " ".repeat(width + 5);
   const lines: string[] = ["Rocket.Chat bot commands:"];
   for (const [title, cmds] of visibleGroups) {
     lines.push("", title);
     for (const [cmd, desc] of cmds) {
-      lines.push(`  ${pad("!" + cmd, width + 1)}  ${desc}`);
+      const [first, ...rest] = desc.split("\n");
+      lines.push(`  ${pad("!" + cmd, width + 1)}  ${first}`);
+      for (const cont of rest) {
+        lines.push(`${descIndent}${cont}`);
+      }
     }
   }
   if (!showAll) lines.push("", "owner-only commands hidden - run as owner to see");
