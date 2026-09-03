@@ -2,6 +2,8 @@
 
 Connect your Rocket.Chat server directly to OpenClaw agents—no bridge server needed.
 
+[View on ClawHub](https://clawhub.ai/plugins/@dodaa08/openclaw-plugin-test)
+
 ## Prerequisetis
 
 - A Rocket.Chat server (with admin access)
