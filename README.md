@@ -1,10 +1,14 @@
-# Rocket.Chat Plugin for OpenClaw
+<h1 align="center">Rocket.Chat Plugin for OpenClaw</h1>
+<div align="center">
+
+![Rocket.Chat Plugin for OpenClaw](https://img.shields.io/badge/Rocket.Chat-OpenClaw%20Plugin-blue?style=for-the-badge&logo=rocket.chat)
 
 Connect your Rocket.Chat server directly to OpenClaw agents—no bridge server needed.
 
 [View on ClawHub](https://clawhub.ai/plugins/@dodaa08/openclaw-plugin-test)
+</div>
 
-## Prerequisetis
+## Prerequisites
 
 - A Rocket.Chat server (with admin access)
 - OpenClaw installed and configured with an AI provider
