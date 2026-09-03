@@ -79,7 +79,7 @@ async function loginWithTwoFactor(
 
     if (method === "email") {
       p.log.info(
-        `A verification code should have been emailed to ${color.cyan(label)}. If you don't receive it, the account may not have email 2FA enabled — leave empty to abort.`,
+        `A verification code should have been emailed to ${color.cyan(label)}. If you don't receive it, the account may not have email 2FA enabled leave empty to abort.`,
       );
     }
 
@@ -157,7 +157,7 @@ export async function resolveAdminAuth(
       message:
         attempt === 1
           ? "Admin password"
-          : `Wrong password — re-enter for ${adminUser} (${3 - attempt} attempt${3 - attempt === 1 ? "" : "s"} left)`,
+          : `Wrong password re-enter for ${adminUser} (${3 - attempt} attempt${3 - attempt === 1 ? "" : "s"} left)`,
       validate: (value) => (value ? undefined : "Password is required"),
     });
 
@@ -222,7 +222,7 @@ export async function resolveAdminAuth(
     } else if (result.reason === "unauthorized") {
       p.log.error("Admin login expired or invalid. Please log in again.");
     } else if (result.reason === "unreachable") {
-      p.log.error("Could not verify admin status — Rocket.Chat server unreachable.");
+      p.log.error("Could not verify admin status Rocket.Chat server unreachable.");
       return null;
     } else if (result.reason === "error") {
       p.log.error(`Login failed: ${result.message}`);

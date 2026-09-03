@@ -13,22 +13,22 @@ const EMAIL_DOCS =
 
 export const CRON_HEADING = "**Cron jobs**";
 export const CRON_USAGE = [
-  "• `!cron <interval> <task>` — one-shot reminder (30s | 5m | 2h | 1d)",
-  "• `!cron --every <interval> <task>` — repeat every interval until stopped",
-  "• `!cron list` — list running jobs",
-  "• `!cron stop <name>` — stop a repeating job",
+  "• `!cron <interval> <task>` one-shot reminder (30s | 5m | 2h | 1d)",
+  "• `!cron --every <interval> <task>` repeat every interval until stopped",
+  "• `!cron list` list running jobs",
+  "• `!cron stop <name>` stop a repeating job",
   "• Examples: `!cron 30m stretch` · `!cron --every 1h check disk space`",
 ].join("\n");
 
 export const EMAIL_HEADING = "**Email**";
 export const EMAIL_USAGE = [
-  "• Send — via Agentmail: `!email send <to> : <subject> : <body>`",
-  "• Fetch — via email skill: `!email fetch <count> [account]` (max 100)",
-  "• Summarize — via email skill + agent: `!email summarize <count> [account]` (max 10)",
+  "• Send via Agentmail: `!email send <to> : <subject> : <body>`",
+  "• Fetch via email skill: `!email fetch <count> [account]` (max 100)",
+  "• Summarize via email skill + agent: `!email summarize <count> [account]` (max 10)",
 ].join("\n");
 
 export const CONFIGURE_HEADING = "**Configure**";
-export const CONFIGURE_USAGE = ["• `!configure` — check skill setup and get setup steps"].join(
+export const CONFIGURE_USAGE = ["• `!configure` check skill setup and get setup steps"].join(
   "\n",
 );
 
@@ -114,14 +114,14 @@ export function runConfigureCommand(): string {
 
   const lines = ["**Setup status**"];
   lines.push(`- Email: ${emailOk ? "**configured**" : "**not configured**"}`);
-  lines.push(`- Send: ${send.ok ? "**configured**" : "**not configured**"} — ${send.hint}`);
-  lines.push(`- Fetch: ${fetch.ok ? "**configured**" : "**not configured**"} — ${fetch.hint}`);
+  lines.push(`- Send: ${send.ok ? "**configured**" : "**not configured**"} ${send.hint}`);
+  lines.push(`- Fetch: ${fetch.ok ? "**configured**" : "**not configured**"} ${fetch.hint}`);
   lines.push("- Cron: **always available** (uses OpenClaw account config)");
 
   if (!emailOk) {
     lines.push("", "### To set up email");
     lines.push(
-      "• Send: set the `AGENTMAIL_API_KEY` env var, or `EMAIL_SMTP_USER` + `EMAIL_SMTP_PASS`, on the gateway — or configure s-nail in `~/.mailrc`.",
+      "• Send: set the `AGENTMAIL_API_KEY` env var, or `EMAIL_SMTP_USER` + `EMAIL_SMTP_PASS`, on the gateway or configure s-nail in `~/.mailrc`.",
     );
     lines.push(
       "• Fetch: set the `GMAIL_APP_PASSWORD` env var (a Gmail app password), or add a file under `~/.config/gmail/`.",
@@ -234,7 +234,7 @@ function parseCronArgs(trimmed: string): CronSubcommand | { ok: false; error: st
       .trim()
       .replace(/^['"]|['"]$/g, "");
     if (!name) {
-      return { ok: false, error: "Usage: `!cron stop <name>` — stop a repeating job." };
+      return { ok: false, error: "Usage: `!cron stop <name>` stop a repeating job." };
     }
     return { type: "stop", name };
   }

@@ -4,11 +4,8 @@ import { DM_SCOPE } from "../utils.js";
 import { RocketChatClient } from "../client/rest.js";
 import type { RCLoginResult } from "../types.js";
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { homedir } from "node:os";
-
-const PLUGIN_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 import {
   readConfig,
   readDefaultModel,
@@ -68,7 +65,7 @@ function normalizeRoomName(name: string): string {
 
 function groupNotFoundText(groupName: string, reasons?: string[]): string {
   if ((reasons ?? []).some((r) => /discussion/i.test(r))) {
-    return `Group "${groupName}" is a discussion. Lending/inviting bots in discussions isn't supported yet — coming soon.`;
+    return `Group "${groupName}" is a discussion. Lending/inviting bots in discussions isn't supported yet coming soon.`;
   }
 
   const forbidden = (reasons ?? []).some((r) =>
@@ -78,10 +75,10 @@ function groupNotFoundText(groupName: string, reasons?: string[]): string {
   let hint: string;
   if (forbidden) {
     hint =
-      "exists but requires permission — this usually happens with private groups where the acting account isn't a member or lacks permission";
+      "exists but requires permission this usually happens with private groups where the acting account isn't a member or lacks permission";
   } else {
     hint =
-      "not found — this could be a private group the acting account isn't a member of, or a discussion (will be supported soon)";
+      "not found this could be a private group the acting account isn't a member of, or a discussion (will be supported soon)";
   }
   return `Group "${groupName}" ${hint}.`;
 }
@@ -487,28 +484,6 @@ function parseSkillFrontmatter(content: string): { name?: string; description?: 
   return result;
 }
 
-/**
- * Skills listed in `.skillsignore` (plugin root) are hidden from the `!skills`
- * menu. One name per line; `#` starts a comment. Editing the file needs no rebuild
- * of plugin logic — only a gateway restart to re-read it.
- */
-function loadHiddenSkills(): Set<string> {
-  const file = resolve(PLUGIN_ROOT, ".skillsignore");
-  const hidden = new Set<string>();
-  try {
-    if (!existsSync(file)) return hidden;
-    const content = readFileSync(file, "utf8");
-    for (const raw of content.split("\n")) {
-      const line = raw.trim();
-      if (!line || line.startsWith("#")) continue;
-      hidden.add(line);
-    }
-  } catch {
-    // ignore — show all skills if the ignore file can't be read
-  }
-  return hidden;
-}
-
 function runSkills(showOwnerOnly: boolean): string {
   const skillsDir = resolve(homedir(), ".openclaw", "skills");
   if (!existsSync(skillsDir)) {
@@ -522,7 +497,6 @@ function runSkills(showOwnerOnly: boolean): string {
       return false;
     }
   });
-  const hidden = loadHiddenSkills();
   const skills: Array<{ name: string; description: string }> = [];
   for (const name of entries) {
     const skillMd = resolve(skillsDir, name, "SKILL.md");
@@ -535,7 +509,6 @@ function runSkills(showOwnerOnly: boolean): string {
     }
     const fm = parseSkillFrontmatter(content);
     if (!fm.name) continue;
-    if (hidden.has(fm.name) || hidden.has(name)) continue;
     skills.push({ name: fm.name, description: fm.description ?? "" });
   }
   if (skills.length === 0) {

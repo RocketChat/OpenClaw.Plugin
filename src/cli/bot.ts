@@ -44,7 +44,7 @@ export async function resolveBotAuth(
 
   if (existingUser) {
     p.log.success(
-      `Bot ${color.cyan(`@${botUsername}`)} already exists — verifying its credentials`,
+      `Bot ${color.cyan(`@${botUsername}`)} already exists verifying its credentials`,
     );
     return verifyExistingBot(rcUrl, botUsername);
   }
@@ -71,7 +71,7 @@ async function verifyExistingBot(
       message:
         attempt === 1
           ? `Password for existing bot @${botUsername}`
-          : `Wrong password — re-enter for @${botUsername} (${3 - attempt} attempt${3 - attempt === 1 ? "" : "s"} left)`,
+          : `Wrong password re-enter for @${botUsername} (${3 - attempt} attempt${3 - attempt === 1 ? "" : "s"} left)`,
       validate: (value) => (value ? undefined : "Password is required"),
     });
     const auth = await loginForServer(rcUrl, botUsername, botPassword, botUsername);

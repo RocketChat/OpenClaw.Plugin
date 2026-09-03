@@ -270,7 +270,7 @@ export async function runSetup(): Promise<void> {
   agentChoices.push({
     value: dedicatedId,
     label: `${dedicatedId} (dedicated agent, auto-created)`,
-    hint: mainAlreadyBound ? "Recommended — isolates memory" : "Isolates memory per bot",
+    hint: mainAlreadyBound ? "Recommended isolates memory" : "Isolates memory per bot",
   });
 
   let chosenAgent: string;
@@ -334,15 +334,15 @@ export async function runSetup(): Promise<void> {
 
   if (agentResult.fallback) {
     p.log.warn(
-      `Could not auto-create dedicated agent 'rc-${accountId}'. Bound to 'main' — ` +
+      `Could not auto-create dedicated agent 'rc-${accountId}'. Bound to 'main' ` +
         `memory is isolated per-bot via session keys, but shares the main agent workspace.`,
     );
   } else if (agentResult.created) {
     p.log.success(
-      `agent — ${agentResult.agentId} (auto-created dedicated agent '${agentResult.agentId}')`,
+      `agent ${agentResult.agentId} (auto-created dedicated agent '${agentResult.agentId}')`,
     );
   } else {
-    p.log.success(`agent — ${agentResult.agentId}`);
+    p.log.success(`agent ${agentResult.agentId}`);
   }
   try {
     addBinding({ channel: "rocketchat", accountId, agentId: agentResult.agentId });
@@ -366,7 +366,7 @@ export async function runSetup(): Promise<void> {
     { label: "Transport", value: "websocket" },
   ]);
   printNextSteps([
-    `Message ${color.cyan(`@${botUsername}`)} in Rocket.Chat — OpenClaw reloads the config automatically, so the bot comes online on its own`,
+    `Message ${color.cyan(`@${botUsername}`)} in Rocket.Chat OpenClaw reloads the config automatically, so the bot comes online on its own`,
   ]);
 
   p.outro(color.green("Setup complete"));
