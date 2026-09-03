@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { homedir } from "node:os";
@@ -57,4 +57,25 @@ export async function saveBotCredentials(username: string, creds: BotCredentials
 
 export async function loadBotCredentials(username: string): Promise<BotCredentials | null> {
   return readJson<BotCredentials>(botFile(username));
+}
+
+/**
+ * Delete a bot's locally stored credentials (the `bot-<username>.json` file and
+ * any backup). This must only ever target the per-bot file, never the shared
+ * `admin.json`, so the rest of the OpenClaw setup is left untouched.
+ */
+export async function removeBotCredentials(username: string): Promise<boolean> {
+  if (!/^[a-zA-Z0-9._-]+$/.test(username)) return false;
+  const file = botFile(username);
+  let removed = false;
+  if (existsSync(file)) {
+    await rm(file, { force: true });
+    removed = true;
+  }
+  const bak = file + ".bak";
+  if (existsSync(bak)) {
+    await rm(bak, { force: true });
+    removed = true;
+  }
+  return removed;
 }

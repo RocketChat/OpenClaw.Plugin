@@ -1,0 +1,465 @@
+{
+  "meta": {
+    "lastTouchedVersion": "2026.7.1-2",
+    "lastTouchedAt": "2026-09-02T12:39:44.692Z"
+  },
+  "wizard": {
+    "lastRunAt": "2026-09-02T12:39:44.660Z",
+    "lastRunVersion": "2026.7.1-2",
+    "lastRunCommand": "onboard",
+    "lastRunMode": "local",
+    "securityAcknowledgedAt": "2026-09-02T12:38:15.663Z"
+  },
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "nvidia-nim": {
+        "baseUrl": "http://127.0.0.1:8082",
+        "apiKey": "YOUR_NIM_API_KEY",
+        "api": "anthropic-messages",
+        "timeoutSeconds": 600,
+        "models": [
+          {
+            "id": "anthropic/nvidia_nim/nvidia/nemotron-3-super-120b-a12b",
+            "name": "Nemotron 3 Super 120B (NVIDIA NIM)",
+            "contextWindow": 1048576,
+            "maxTokens": 32000
+          },
+          {
+            "id": "anthropic/nvidia_nim/meta/llama-3.1-70b-instruct",
+            "name": "Llama 3.1 70B Instruct (NVIDIA NIM)",
+            "contextWindow": 131072,
+            "maxTokens": 32000
+          },
+          {
+            "id": "anthropic/nvidia_nim/meta/llama-3.2-11b-vision-instruct",
+            "name": "Llama 3.2 11B Vision (NVIDIA NIM)",
+            "contextWindow": 131072,
+            "maxTokens": 32000,
+            "input": [
+              "text",
+              "image"
+            ]
+          },
+          {
+            "id": "anthropic/nvidia_nim/meta/llama-3.2-90b-vision-instruct",
+            "name": "Llama 3.2 90B Vision (NVIDIA NIM)",
+            "contextWindow": 131072,
+            "maxTokens": 32000,
+            "input": [
+              "text",
+              "image"
+            ]
+          }
+        ]
+      },
+      "anthropic": {
+        "baseUrl": "http://127.0.0.1:8082",
+        "apiKey": "YOUR_ANTHROPIC_API_KEY",
+        "api": "anthropic-messages",
+        "timeoutSeconds": 600,
+        "models": [
+          {
+            "id": "nvidia_nim/meta/llama-3.2-11b-vision-instruct",
+            "name": "Llama 3.2 11B Vision (NVIDIA NIM)",
+            "contextWindow": 131072,
+            "maxTokens": 32000,
+            "input": [
+              "text",
+              "image"
+            ]
+          },
+          {
+            "id": "nvidia_nim/meta/llama-3.2-90b-vision-instruct",
+            "name": "Llama 3.2 90B Vision (NVIDIA NIM)",
+            "contextWindow": 131072,
+            "maxTokens": 32000,
+            "input": [
+              "text",
+              "image"
+            ]
+          },
+          {
+            "id": "nvidia_nim/meta/llama-3.1-70b-instruct",
+            "name": "Llama 3.1 70B Instruct (NVIDIA NIM)",
+            "contextWindow": 131072,
+            "maxTokens": 32000,
+            "input": [
+              "text"
+            ]
+          }
+        ]
+      },
+      "nvidia-direct": {
+        "baseUrl": "https://integrate.api.nvidia.com/v1",
+        "apiKey": "YOUR_NVIDIA_API_KEY",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "nvidia/nemotron-3.5-lightning-30b-a3b",
+            "name": "Nemotron 3.5 Lightning 30B (fast)",
+            "contextWindow": 131072,
+            "maxTokens": 32768
+          },
+          {
+            "id": "nv-mistralai/mistral-nemo-12b-instruct",
+            "name": "Mistral Nemo 12B",
+            "contextWindow": 131072,
+            "maxTokens": 32768
+          },
+          {
+            "id": "mistralai/mistral-large",
+            "name": "Mistral Large",
+            "contextWindow": 32768,
+            "maxTokens": 32768
+          },
+          {
+            "id": "nvidia/llama-3.1-nemotron-70b-instruct",
+            "name": "Nemotron 70B Instruct",
+            "contextWindow": 131072,
+            "maxTokens": 32768
+          },
+          {
+            "id": "meta/llama-3.2-11b-vision-instruct",
+            "name": "Llama 3.2 11B Vision",
+            "contextWindow": 131072,
+            "maxTokens": 32768
+          },
+          {
+            "id": "nvidia/nemotron-3-ultra-550b-a55b",
+            "name": "Nemotron 3 Ultra 550B-A55B",
+            "contextWindow": 262144,
+            "maxTokens": 32768
+          },
+          {
+            "id": "deepseek-ai/deepseek-v4-flash-0731",
+            "name": "DeepSeek V4 Flash",
+            "contextWindow": 131072,
+            "maxTokens": 32768
+          }
+        ]
+      },
+      "openrouter": {
+        "baseUrl": "https://openrouter.ai/api/v1",
+        "apiKey": "YOUR_OPENROUTER_API_KEY",
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "nvidia/nemotron-3-super-120b-a12b:free",
+            "name": "Nemotron 3 Super (OpenRouter Free)",
+            "contextWindow": 1048576,
+            "maxTokens": 32000
+          },
+          {
+            "id": "nvidia/nemotron-3-ultra-550b-a55b:free",
+            "name": "Nemotron 3 Ultra (OpenRouter Free)",
+            "contextWindow": 1048576,
+            "maxTokens": 32000,
+            "reasoning": true
+          },
+          {
+            "id": "meta-llama/llama-3.3-70b:free",
+            "name": "Llama 3.3 70B (OpenRouter Free)",
+            "contextWindow": 131072,
+            "maxTokens": 32000
+          },
+          {
+            "id": "openrouter/free",
+            "name": "OpenRouter Auto Free",
+            "contextWindow": 131072,
+            "maxTokens": 32000
+          },
+          {
+            "id": "google/gemini-2.0-flash-thinking-exp:free",
+            "name": "Gemini 2.0 Flash Thinking (OpenRouter Free)",
+            "contextWindow": 1048576,
+            "maxTokens": 32000,
+            "reasoning": true,
+            "input": [
+              "text",
+              "image"
+            ]
+          },
+          {
+            "id": "meta-llama/llama-3.2-11b-vision-instruct:free",
+            "name": "Llama 3.2 11B Vision (OpenRouter Free)",
+            "contextWindow": 131072,
+            "maxTokens": 32000,
+            "input": [
+              "text",
+              "image"
+            ]
+          }
+        ]
+      },
+      "ollama": {
+        "baseUrl": "http://127.0.0.1:11434",
+        "apiKey": "ollama",
+        "api": "ollama",
+        "models": [
+          {
+            "id": "llama3.2:3b",
+            "name": "Llama 3.2 3B (Ollama)",
+            "contextWindow": 16000,
+            "maxTokens": 32000,
+            "reasoning": false,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "api": "ollama",
+            "params": {
+              "num_ctx": 16000
+            }
+          },
+          {
+            "id": "qwen2.5:3b",
+            "name": "qwen2.5:3b (Ollama)",
+            "contextWindow": 16000,
+            "maxTokens": 32000,
+            "reasoning": false,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "api": "ollama",
+            "params": {
+              "num_ctx": 16000
+            }
+          },
+          {
+            "id": "mistral:7b",
+            "name": "Mistral 7B (Ollama)",
+            "contextWindow": 32000,
+            "maxTokens": 32000,
+            "reasoning": false,
+            "input": [
+              "text"
+            ],
+            "cost": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheWrite": 0
+            },
+            "api": "ollama",
+            "params": {
+              "num_ctx": 32000
+            }
+          }
+        ]
+      }
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": {
+        "primary": "nvidia-direct/nvidia/nemotron-3.5-lightning-30b-a3b"
+      },
+      "models": {
+        "nvidia-nim/anthropic/nvidia_nim/nvidia/nemotron-3-super-120b-a12b": {},
+        "nvidia-direct/nvidia/nemotron-3-ultra-550b-a55b": {},
+        "nvidia-nim/anthropic/nvidia_nim/meta/llama-3.2-90b-vision-instruct": {},
+        "nvidia-nim/anthropic/nvidia_nim/meta/llama-3.2-11b-vision-instruct": {},
+        "nvidia-direct/meta/llama-3.1-70b-instruct": {},
+        "nvidia-direct/meta/llama-3.2-90b-vision-instruct": {},
+        "openrouter/nvidia/nemotron-3-super-120b-a12b:free": {},
+        "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free": {},
+        "openrouter/meta-llama/llama-3.3-70b:free": {},
+        "openrouter/free": {},
+        "openrouter/google/gemini-2.0-flash-thinking-exp:free": {},
+        "openrouter/meta-llama/llama-3.2-11b-vision-instruct:free": {},
+        "ollama/llama3.2:3b": {},
+        "ollama/qwen2.5:3b": {},
+        "ollama/mistral:7b": {},
+        "nvidia-direct/nvidia/nemotron-3.5-lightning-30b-a3b": {}
+      },
+      "workspace": "/home/USERNAME/.openclaw/workspace",
+      "memorySearch": {
+        "enabled": true
+      },
+      "compaction": {
+        "mode": "safeguard"
+      },
+      "timeoutSeconds": 300,
+      "maxConcurrent": 4,
+      "subagents": {
+        "maxConcurrent": 8
+      },
+      "imageModel": "nvidia-nim/anthropic/nvidia_nim/meta/llama-3.2-11b-vision-instruct"
+    },
+    "list": [
+      {
+        "id": "main",
+        "default": true,
+        "workspace": "/home/USERNAME/.openclaw/workspace"
+      }
+    ]
+  },
+  "tools": {
+    "profile": "full",
+    "web": {
+      "search": {
+        "enabled": false
+      },
+      "fetch": {
+        "enabled": false
+      }
+    },
+    "exec": {
+      "host": "gateway",
+      "mode": "full"
+    },
+    "media": {
+      "audio": {
+        "enabled": true,
+        "models": [
+          {
+            "type": "cli",
+            "command": "whisper-cli",
+            "args": [
+              "-m",
+              "/home/USERNAME/.local/share/whisper-cpp/ggml-base.en.bin",
+              "--no-timestamps",
+              "-otxt",
+              "-of",
+              "{{OutputBase}}",
+              "{{MediaPath}}"
+            ],
+            "timeoutSeconds": 60
+          }
+        ]
+      },
+      "video": {
+        "enabled": false
+      }
+    },
+    "deny": []
+  },
+  "commands": {
+    "native": true,
+    "nativeSkills": false,
+    "restart": true,
+    "ownerDisplay": "raw",
+    "ownerAllowFrom": [
+      "rocketchat:CHANNEL_ID"
+    ]
+  },
+  "session": {
+    "dmScope": "per-channel-peer",
+    "maintenance": {
+      "pruneAfter": "7d",
+      "maxEntries": 200
+    }
+  },
+  "messages": {
+    "groupChat": {
+      "historyLimit": 20
+    }
+  },
+  "hooks": {
+    "enabled": true,
+    "token": "YOUR_HOOK_TOKEN",
+    "allowRequestSessionKey": false,
+    "allowedSessionKeyPrefixes": [
+      "hook:"
+    ],
+    "internal": {
+      "enabled": true,
+      "entries": {
+        "session-memory": {
+          "enabled": true
+        }
+      }
+    }
+  },
+  "gateway": {
+    "port": 18789,
+    "mode": "local",
+    "bind": "loopback",
+    "auth": {
+      "mode": "token",
+      "token": "YOUR_GATEWAY_AUTH_TOKEN"
+    },
+    "tailscale": {
+      "mode": "off",
+      "resetOnExit": false
+    },
+    "controlUi": {
+      "allowInsecureAuth": true
+    }
+  },
+  "plugins": {
+    "allow": [
+      "memory-core",
+      "document-extract",
+      "anthropic",
+      "rocketchat"
+    ],
+    "bundledDiscovery": "allowlist",
+    "entries": {
+      "document-extract": {
+        "enabled": true
+      },
+      "anthropic": {
+        "enabled": true
+      },
+      "rocketchat": {
+        "enabled": true
+      }
+    },
+    "load": {
+      "paths": [
+        "/home/USERNAME/personal/GSOC_project/Openclaw"
+      ]
+    }
+  },
+  "skills": {
+    "entries": {
+      "himalaya": {
+        "enabled": true
+      },
+      "github": {
+        "enabled": true
+      },
+      "cron": {
+        "enabled": true
+      },
+      "email": {
+        "enabled": true
+      }
+    }
+  },
+  "bindings": [],
+  "mcp": {
+    "servers": {
+      "excalidraw": {
+        "url": "https://mcp.excalidraw.com/mcp",
+        "transport": "streamable-http",
+        "connect_timeout": 30000,
+        "requestTimeoutMs": 180000,
+        "timeout": 180000
+      }
+    }
+  },
+  "cron": {
+    "triggers": {
+      "enabled": true
+    }
+  },
+  "channels": {
+    "rocketchat": {
+      "accounts": {}
+    }
+  }
+}

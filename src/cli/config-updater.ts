@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, renameSync, readdirSync, rmSync, mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
+import { createHash } from "node:crypto";
 import JSON5 from "json5";
 import type { AuthCredentials, JsonObject } from "../types.js";
 
@@ -434,4 +435,37 @@ export function removeAccount(accountId: string): void {
 export function removeAgentDir(accountId: string): void {
   const dir = resolve(homedir(), ".openclaw", "agents", `rc-${accountId}`);
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  removeWorkspaceAttestations(dir);
+
+  const cfg = readConfig() as Record<string, any>;
+  const list = cfg?.agents?.list;
+  if (Array.isArray(list)) {
+    const next = list.filter(
+      (a: any) => !(a && typeof a.id === "string" && a.id === `rc-${accountId}`),
+    );
+    if (next.length !== list.length) {
+      cfg.agents.list = next;
+      writeConfig(cfg);
+    }
+  }
+}
+
+/**
+ * Remove OpenClaw workspace attestations for a workspace directory. OpenClaw
+ * core names these files `<sha256(absoluteWorkspaceDir)>.attested` in the state
+ * dir's `workspace-attestations/` folder (plus a legacy inline `<dir>.attested`).
+ * Deleting a workspace without removing its attestation causes
+ * `WorkspaceVanishedError` on the next message, so they must be cleaned together.
+ */
+function removeWorkspaceAttestations(workspaceDir: string): void {
+  const key = createHash("sha256").update(resolve(workspaceDir)).digest("hex");
+  const stateDirs = [resolve(homedir(), ".openclaw"), resolve(homedir(), ".clawdbot")];
+  for (const stateDir of stateDirs) {
+    const base = resolve(stateDir, "workspace-attestations");
+    if (!existsSync(base)) continue;
+    const file = resolve(base, `${key}.attested`);
+    if (existsSync(file)) rmSync(file, { force: true });
+  }
+  const legacy = `${resolve(workspaceDir)}.attested`;
+  if (existsSync(legacy)) rmSync(legacy, { force: true });
 }

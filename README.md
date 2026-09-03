@@ -87,7 +87,7 @@ Send these in a DM to the bot, or @-mention the bot with the command in a group.
 | `!groups` | List groups/channels the bot has joined. |
 | `!access` | Who is allowed to use the bot. |
 | `!add-bot <user>` | Create a new bot account + dedicated agent. |
-| `!remove-bot <user...>` | Delete bot account(s). |
+| `!remove-bot <user...>` | Delete bot account(s); clears config, creds, agent (gateway auto-restarts). Optional: run `openclaw sessions cleanup` to also purge old shared-agent sessions. |
 | `!add-group <group> [bot]` | Invite a bot into a group. |
 | `!lend <group\|dm> <user>` | Grant access to a group or DM. |
 | `!revoke <group\|dm> <user>` | Revoke access. |

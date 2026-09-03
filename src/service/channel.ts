@@ -36,7 +36,7 @@ import {
   type RocketChatGroup,
 } from "../cli/admin-api.js";
 import { checkBotCreationLimit, recordBotCreation } from "../cli/rate-limiter.js";
-import { loadAdmin } from "../cli/credentials.js";
+import { loadAdmin, removeBotCredentials } from "../cli/credentials.js";
 import { startGateway } from "./gateway.js";
 import { activeClients, connectionStatus } from "./runtime-state.js";
 import { AccessStore } from "../config/access-store.js";
@@ -280,7 +280,7 @@ function buildHelpText(showAll: boolean): string {
         ["groups", "groups joined by bots"],
         ["access", "who can use"],
         ["add-bot <user>", "create a bot"],
-        ["remove-bot <user...>", "delete bot(s)"],
+        ["remove-bot <user...>", "delete bot(s); clears config, creds, agent — gateway auto-restarts; run `openclaw sessions cleanup` to purge old shared sessions"],
         ["add-group <group> [bot]", "invite bot to group"],
         ["lend <group> <user>", "grant group access"],
         ["lend dm <user>", "grant DM access"],
@@ -1059,7 +1059,7 @@ async function runRemoveBot(ctx: CommandContext, argStr: string): Promise<string
   const { positional } = parseArgs(argStr);
   const usernames = positional.map((p) => p.trim().replace(/^@+/, "")).filter(Boolean);
   if (usernames.length === 0)
-    return "Usage: `!remove-bot <username...>` - delete one or more bot accounts (server user + OpenClaw config)";
+    return "Usage: `!remove-bot <username...>` - delete one or more bot accounts (server user + OpenClaw config). Clears config, creds & agent; gateway auto-restarts. Optional: run `openclaw sessions cleanup` to also purge old shared-agent sessions.";
 
   try {
     const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
@@ -1106,20 +1106,48 @@ async function removeSingleBot(
   const boundAgent = existingBindings[0]?.agentId;
   const ownsDedicatedAgent = boundAgent === `rc-${username}`;
 
-  removeBindingsForAccount(username);
-  removeAccount(username);
-  if (ownsDedicatedAgent) {
-    removeAgentDir(username);
+  const steps: string[] = [];
+
+  try {
+    removeBindingsForAccount(username);
+    steps.push("OpenClaw binding removed");
+  } catch (e: unknown) {
+    steps.push(`binding cleanup failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  const trims = [
-    serverNote,
-    "account+binding removed",
-    ownsDedicatedAgent
-      ? `workspace \`rc-${username}\` removed`
-      : `kept shared agent \`${boundAgent}\``,
-  ].join(", ");
-  return { removed: true, text: `- ${username}: ${trims}` };
+  try {
+    removeAccount(username);
+    steps.push("OpenClaw account removed");
+  } catch (e: unknown) {
+    steps.push(`account cleanup failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  let credNote = "kept no credentials (none stored)";
+  try {
+    if (await removeBotCredentials(username)) {
+      credNote = "local credentials deleted";
+    } else {
+      credNote = "no local credential file found";
+    }
+  } catch (e: unknown) {
+    credNote = `credential cleanup failed: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  steps.push(credNote);
+
+  if (ownsDedicatedAgent) {
+    try {
+      removeAgentDir(username);
+      steps.push(`workspace \`rc-${username}\` removed`);
+    } catch (e: unknown) {
+      steps.push(`workspace cleanup failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  } else {
+    steps.push(`kept shared agent \`${boundAgent}\``);
+  }
+
+  const trims = [serverNote, ...steps].join(", ");
+
+  return { removed: true, text: `- ${username}: ${trims}.` };
 }
 
 async function runAddGroup(ctx: CommandContext, argStr: string): Promise<string> {
