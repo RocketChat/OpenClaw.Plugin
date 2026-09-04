@@ -5,5 +5,4 @@ node_modules
 dist
 .pnpm-store/
 ROADMAP.md
-docs
-CONTRIBUTING.md
+preview.md

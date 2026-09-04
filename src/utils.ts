@@ -52,6 +52,21 @@ export function extractQuotedMessageId(link: string): string | undefined {
 /** Sentinel roomId used for grants that permit direct-message (DM) access only. */
 export const DM_SCOPE = "dm";
 
+export class CommandParser {
+  static parse(text: string): { command: string; args: string[]; raw: string } | null {
+    const trimmed = text.trim();
+    const match = trimmed.match(/^!(\S+)(?:\s+([\s\S]*))?$/i);
+    if (!match) return null;
+    const [, cmd, argsStr = ""] = match;
+    const args = argsStr.trim().split(/\s+/).filter(Boolean);
+    return { command: cmd!.toLowerCase(), args, raw: argsStr.trim() };
+  }
+
+  static isValid(text: string): boolean {
+    return /^!\S+/.test(text.trim());
+  }
+}
+
 /**
  * Strip the `@` prefix from any `@username` mention whose username matches a
  * known bot identity. This prevents outbound bot replies from triggering

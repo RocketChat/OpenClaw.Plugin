@@ -33,57 +33,40 @@ Then verify in Rocket.Chat by DMing the bot:
 
 You should see `gateway - online` and `runtime - ready`.
 
-**Credentials are stored securely** in `~/.openclaw/credentials/` — On your machine, the plugin never stores or displays tokens directly.
+> Credentials are stored securely in `~/.openclaw/credentials/` (owner-only permissions).
 
-## Commands
-
-In a DM to the bot or @-mention it with the command in a group.
-
-### Bot
+## Common Commands
 
 | Command | Description |
 |---------|-------------|
-| `!help` | Show the command menu |
-| `!status` | Gateway status |
+| `!help` | Show all commands |
+| `!status` | Gateway + connection status |
 | `!bots` | List bots and agents |
-| `!groups` | Groups joined by bots |
-| `!access` | Who can use this bot |
-| `!add-bot <user>` | Create a new bot |
-| `!remove-bot <user...>` | Delete bot(s); clears config, creds, agent |
-| `!add-group <group> [bot]` | Invite bot to group |
-| `!lend <group> <user>` | Grant group access |
-| `!lend dm <user>` | Grant DM access |
-| `!revoke <group> <user>` | Revoke group access |
-| `!revoke dm <user>` | Revoke DM access |
-
-### Context
-
-| Command | Description |
-|---------|-------------|
+| `!add-bot <user>` | Create a new bot (owner) |
+| `!remove-bot <user...>` | Delete bot(s) (owner) |
+| `!lend <group> <user>` | Grant access |
+| `!revoke <group> <user>` | Revoke access |
+| `!model` / `!model set <name>` | Show or switch model |
 | `!compact` | Compress conversation history |
-| `!reset` | Wipe all context |
-| `!new [model]` | Fresh start (optionally switch model) |
+| `!reset` | Wipe context |
+| `!new [model]` | Start fresh conversation |
+| `!think <level>` | Set thinking depth (`off` / `low` / `medium` / `high`) |
+| `!abort` | Stop current reply |
 
-### Model
 
-| Command | Description |
-|---------|-------------|
-| `!model` | Show current + list available models |
-| `!model set <name>` | Switch to a different model |
+## Notes
 
-### Behavior
+- All data stays on your machine — no cloud uploads
+- Each bot is isolated (own connection, own agent, own access grants)
+- Admin token is only used during setup and can be deleted afterward
 
-| Command | Description |
-|---------|-------------|
-| `!think <level>` | Set reasoning depth: `off`, `low`, `medium`, `high` |
-| `!abort` | Stop the in-flight reply |
-| `!reasoning on/off` | Show or hide reasoning text |
-| `!verbose on/off` | Show or hide debug details |
 
-### Tools & Skills
+## Documentation
 
-| Command | Description |
-|---------|-------------|
-| `!tools` | List agent tools |
-| `!skills` | List installed skills |
-| `!skill <name>` | Run a skill |
+| Doc | Description |
+|-----|-------------|
+| [SETUP.md](./SETUP.md) | Full installation, credentials & email setup |
+| [ARCHITECTURE.md](./ARCHITECTURE.md) | How the plugin works (DDP + REST, multi-bot, security) |
+| [COMMANDS.md](./COMMANDS.md) | Complete command reference |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Contributors guide |
+

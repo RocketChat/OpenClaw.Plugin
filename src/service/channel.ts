@@ -1,6 +1,6 @@
 import type { InboundEvent } from "../types.js";
 import type { ChannelRuleOptions } from "../types.js";
-import { DM_SCOPE } from "../utils.js";
+import { DM_SCOPE, CommandParser } from "../utils.js";
 import { RocketChatClient } from "../client/rest.js";
 import type { RCLoginResult } from "../types.js";
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
@@ -141,8 +141,6 @@ export type CommandResult =
   | { action: "passthrough" }
   | { action: "openclaw-command"; command: string };
 
-const COMMAND_RE = /^\s*!(\S+)(?:\s+([\s\S]*))?$/i;
-
 /**
  * Commands restricted to the bot owner (`accounts.<id>.owner`). Any other user
  * with access who tries one of these gets a permission reply and the command is
@@ -171,12 +169,10 @@ export async function matchCommand(text: string, ctx: CommandContext): Promise<C
     .replace(/^\s*(@\S+\s+)+/, "")
     .trim()
     .replace(/^!\s+/, "!");
-  const match = normalized.match(COMMAND_RE);
-  if (!match) return { action: "passthrough" };
-  const cmd = match[1]!.toLowerCase();
-  const argStr = match[2] ?? "";
-  const result = await runCommand(cmd, argStr, ctx);
-  return result.action === "reply" ? { ...result, command: cmd } : result;
+  const parsed = CommandParser.parse(normalized);
+  if (!parsed) return { action: "passthrough" };
+  const result = await runCommand(parsed.command, parsed.raw, ctx);
+  return result.action === "reply" ? { ...result, command: parsed.command } : result;
 }
 
 async function runCommand(
