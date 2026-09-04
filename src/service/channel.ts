@@ -347,7 +347,8 @@ function buildHelpText(showAll: boolean): string {
     }
   }
   if (!showAll) lines.push("", "owner-only commands hidden - run as owner to see");
-  return "```\n" + lines.join("\n") + "\n```";
+  const footer = "\n\n💡 These commands are for quick, small tasks. For better and more precise results, use direct inbound messages.";
+  return "```\n" + lines.join("\n") + "\n```" + footer;
 }
 
 function shortModelId(full: string): string {

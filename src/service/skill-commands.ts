@@ -9,7 +9,7 @@ import type { CommandContext } from "./channel.js";
 const execFileAsync = promisify(execFile);
 
 const EMAIL_DOCS =
-  "https://github.com/dodaa08/GSOC_project/Openclaw/blob/main/README.md#skills-setup";
+  "https://github.com/RocketChat/Openclaw/blob/main/docs/SETUP.md#email-setup-for-command-menu-email-skill";
 
 export const CRON_HEADING = "**Cron jobs**";
 export const CRON_USAGE = [
@@ -22,9 +22,12 @@ export const CRON_USAGE = [
 
 export const EMAIL_HEADING = "**Email**";
 export const EMAIL_USAGE = [
-  "• Send via Agentmail: `!email send <to> : <subject> : <body>`",
-  "• Fetch via email skill: `!email fetch <count> [account]` (max 100)",
+  "• Send quick emails: `!email send <to> : <subject> : <body>`",
+  "• Fetch via email skill: `!email fetch <count> [account]` (max 20)",
   "• Summarize via email skill + agent: `!email summarize <count> [account]` (max 10)",
+  "",
+  "ℹ️ `!email send` is for quick, simple emails. For professional emails, use inbound chat.",
+  "⚠️ Don't use ` : ` (space-colon-space) in the subject — it's the separator for the format.",
 ].join("\n");
 
 export const CONFIGURE_HEADING = "**Configure**";
@@ -454,7 +457,7 @@ async function fetchEmailRaw(count: number, account: string): Promise<string> {
 
 async function fetchEmail(countInput: string, accountInput: string | undefined): Promise<string> {
   const count = parseInt(countInput, 10);
-  if (!Number.isInteger(count) || count < 1 || count > 100) {
+  if (!Number.isInteger(count) || count < 1 || count > 20) {
     return [
       "Invalid count for fetching emails.",
       "Correct format:",
@@ -659,10 +662,20 @@ export async function runEmailCommand(ctx: CommandContext, argStr: string): Prom
   }
 
   if (sub === "send") {
-    const parts = rest.split(":").map((s) => s.trim());
-    const to = parts[0] ?? "";
-    const subject = parts[1] ?? "";
-    const body = parts[2] ?? "";
+    const sepIdx = rest.indexOf(" : ");
+    if (sepIdx === -1) {
+      return [
+        "Invalid send format.",
+        "Correct format:",
+        "• `!email send <to> : <subject> : <body>`",
+        "• Example: `!email send friend@example.com : Hello : Check this out`",
+      ].join("\n");
+    }
+    const afterFirst = rest.slice(sepIdx + 3);
+    const secondSepIdx = afterFirst.indexOf(" : ");
+    const to = rest.slice(0, sepIdx).trim();
+    const subject = secondSepIdx === -1 ? afterFirst.trim() : afterFirst.slice(0, secondSepIdx).trim();
+    const body = secondSepIdx === -1 ? "" : afterFirst.slice(secondSepIdx + 3).trim();
     if (!to || !subject || !body) {
       return [
         "Invalid send format.",

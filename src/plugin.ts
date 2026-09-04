@@ -23,7 +23,7 @@ export const rocketchatPlugin = createChatChannelPlugin<ResolvedAccount>({
       id: "rocketchat",
       label: "Rocket.Chat",
       selectionLabel: "Rocket.Chat",
-      docsPath: "https://rocket.chat/docs",
+      docsPath: "https://github.com/RocketChat/Openclaw/tree/main/docs",
       blurb: "Rocket.Chat channel plugin with DDP/websocket outbound/inbound",
       aliases: ["rc"],
     },

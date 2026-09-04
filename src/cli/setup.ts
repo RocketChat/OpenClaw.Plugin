@@ -38,7 +38,7 @@ import type { RCLoginResult } from "../types.js";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PLUGIN_PATH = resolve(__dirname, "..", "..");
 const OC_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
-const DOC_LINK = "https://openclaw.ai/docs/rocketchat";
+const DOC_LINK = "https://github.com/RocketChat/Openclaw/blob/main/docs/SETUP.md#remove-a-bot";
 
 async function promptServerUrl(defaultValue: string): Promise<string> {
   const urlInput = await promptText({
