@@ -27,30 +27,30 @@ openclaw plugins update --all
 
 The wizard prompts you through these steps:
 
-1. **Server URL**  
+1. **Server URL**
    └─ Validates connection + checks server health
 
-2. **Admin Login**  
-   ├─ Tries saved credentials first (if exists)  
-   ├─ Prompts username + password if needed  
-   ├─ Handles 2FA (TOTP or email challenge)  
+2. **Admin Login**
+   ├─ Tries saved credentials first (if exists)
+   ├─ Prompts username + password if needed
+   ├─ Handles 2FA (TOTP or email challenge)
    └─ Saves admin token (used only during setup)
 
-3. **Bot Username**  
+3. **Bot Username**
    └─ Creates bot user on server
 
-4. **Bot Password**  
-   ├─ Auto-generated (shown once, save it if needed) if created using command menu  
+4. **Bot Password**
+   ├─ Auto-generated (shown once, save it if needed) if created using command menu
    └─ Saved securely locally
 
-5. **Agent Selection**  
-   ├─ `"main"` (shared agent)  
+5. **Agent Selection**
+   ├─ `"main"` (shared agent)
    └─ `"rc-<username>"` (dedicated agent, auto-created)
 
-6. **Config Saved**  
+6. **Config Saved**
    └─ `~/.openclaw/openclaw.json` updated
 
-7. **Bot Setup Complete**  
+7. **Bot Setup Complete**
    └─ Welcome DM sent to bot owner (optional)
 
 8. **(Optional)** Invite bot to a group
@@ -83,11 +83,11 @@ rocketchat/
 
 ### Credentials: What's Safe to Delete
 
-| File                | Safe to Delete? | What Happens                                 |
-|---------------------|-----------------|----------------------------------------------|
-| `admin.json`        | ✅ Yes          | Next setup will re-prompt for admin login    |
-| `admin.json.bak`    | ✅ Yes          | Just a backup; doesn't affect anything       |
-| `bot-<username>.json` | ❌ No         | Bot can't reconnect; use `!remove-bot` instead |
+| File                  | Safe to Delete? | What Happens                                   |
+| --------------------- | --------------- | ---------------------------------------------- |
+| `admin.json`          | ✅ Yes           | Next setup will re-prompt for admin login      |
+| `admin.json.bak`      | ✅ Yes           | Just a backup; doesn't affect anything         |
+| `bot-<username>.json` | ❌ No            | Bot can't reconnect; use `!remove-bot` instead |
 
 ## Remove a Bot
 
@@ -140,37 +140,71 @@ Optional overrides for paths and email skills. Set these in your shell before st
 
 ### Path Configuration
 
-| Variable           | Purpose                                              | Default     |
-|--------------------|------------------------------------------------------|-------------|
-| `OPENCLAW_STATE_DIR` | Custom directory for all config/credentials        | `~/.openclaw` |
-| `OPENCLAW_HOME`      | Custom home; config becomes `$OPENCLAW_HOME/.openclaw` | `~`       |
+| Variable             | Purpose                                                | Default       |
+| -------------------- | ------------------------------------------------------ | ------------- |
+| `OPENCLAW_STATE_DIR` | Custom directory for all config/credentials            | `~/.openclaw` |
+| `OPENCLAW_HOME`      | Custom home; config becomes `$OPENCLAW_HOME/.openclaw` | `~`           |
 
 ---
 
-## Email Setup (Simplified)
+## Email Setup (for command menu email skill)
 
 Email skills enable the `!email send` and `!email fetch` commands in Rocket.Chat.  
 Without the correct credentials, these commands will not work.
 
-### Recommended Simple Setup
+### Overview
 
-| Purpose   | Recommended Method                          | Notes                                      |
-|-----------|---------------------------------------------|--------------------------------------------|
-| **Send**  | `~/.netrc` file (Linux / macOS)             | Cleanest, no env vars needed               |
-| **Send**  | Environment variables (Windows)             | Easiest on Windows                         |
-| **Fetch** | Gmail App Password                          | Required for `!email fetch`                |
+| Purpose  | Option 1 (Simplest)       | Option 2 (Recommended / more robust)     |
+|----------|---------------------------|------------------------------------------|
+| **Send**   | Environment variables     | `~/.netrc` (Linux/macOS)                 |
+| **Fetch**  | Environment variables     | systemd / shell profile / permanent env  |
 
-### 1. Sending Emails
+---
 
-#### Linux & macOS (recommended)
+### Option 1 – Environment Variables Only (works on all OS)
 
-Create or edit `~/.netrc`:
+This is the quickest way and works on Linux, macOS, and Windows.
+
+```bash
+# Send + Fetch (Gmail App Password)
+export EMAIL_SMTP_USER="you@gmail.com"
+export EMAIL_SMTP_PASS="xxxx xxxx xxxx xxxx"   # Gmail App Password
+export GMAIL_APP_PASSWORD="xxxx xxxx xxxx xxxx"
+export GMAIL_ACCOUNT="you@gmail.com"
+export EMAIL_FROM="you@gmail.com"
+```
+
+**Windows (PowerShell):**
+
+```powershell
+$env:EMAIL_SMTP_USER = "you@gmail.com"
+$env:EMAIL_SMTP_PASS = "xxxx xxxx xxxx xxxx"
+$env:GMAIL_APP_PASSWORD = "xxxx xxxx xxxx xxxx"
+$env:GMAIL_ACCOUNT = "you@gmail.com"
+$env:EMAIL_FROM = "you@gmail.com"
+```
+
+Then restart the gateway:
+
+```bash
+openclaw gateway restart
+```
+
+> Tip: To make these permanent, add them to your shell profile (`~/.zshrc`, `~/.bashrc`, `$PROFILE`) or System Environment Variables on Windows.
+
+---
+
+### Option 2 – OS-native / recommended methods
+
+#### Sending Emails
+
+**Linux & macOS (recommended)** – use `~/.netrc` (no environment variables needed):
 
 ```bash
 nano ~/.netrc
 ```
 
-Add this line (replace with your real Gmail + app password):
+Add:
 
 ```
 machine smtp.gmail.com login you@gmail.com password "xxxx xxxx xxxx xxxx"
@@ -182,31 +216,22 @@ Lock the file:
 chmod 0600 ~/.netrc
 ```
 
-`s-nail` reads this automatically — no extra environment variables needed.
+`s-nail` will pick this up automatically.
 
-#### Windows
+**Windows** – stick with Option 1 (environment variables). There is no clean equivalent of `~/.netrc` for this use case.
 
-Use environment variables instead:
+#### Fetching Emails (Gmail App Password)
 
-```powershell
-$env:EMAIL_SMTP_USER = "you@gmail.com"
-$env:EMAIL_SMTP_PASS = "xxxx xxxx xxxx xxxx"
-```
+You still need a Gmail **App Password** (not your normal password).  
+Generate one at: Google Account → Security → 2-Step Verification → App passwords → “Mail”.
 
-### 2. Fetching Emails (Gmail App Password)
-
-You need a Gmail **App Password** (not your regular password).
-
-Generate one at:  
-Google Account → Security → 2-Step Verification → App passwords → select "Mail".
-
-#### Linux (systemd – recommended for production)
+**Linux (systemd – best for production):**
 
 ```bash
 systemctl --user edit --full openclaw-gateway.service
 ```
 
-Add under the `[Service]` section:
+Add under `[Service]`:
 
 ```
 Environment="GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx"
@@ -216,7 +241,7 @@ Environment=EMAIL_FROM=you@gmail.com
 
 **Important:** Quote the entire `KEY=value` pair because Gmail app passwords contain spaces.
 
-Reload and restart:
+Reload & restart:
 
 ```bash
 systemctl --user daemon-reload
@@ -231,11 +256,10 @@ systemctl --user show openclaw-gateway.service -p Environment | grep GMAIL
 
 > Note: OpenClaw may regenerate the service file on updates. Re-check and re-add these lines after each upgrade.
 
-#### macOS / Linux (shell profile)
-
-Add to `~/.zshrc`, `~/.bashrc`, or `~/.profile`:
+**macOS / Linux (shell profile):**
 
 ```bash
+# ~/.zshrc, ~/.bashrc or ~/.profile
 export GMAIL_APP_PASSWORD="xxxx xxxx xxxx xxxx"
 export GMAIL_ACCOUNT="you@gmail.com"
 export EMAIL_FROM="you@gmail.com"
@@ -248,16 +272,9 @@ source ~/.zshrc   # or the file you edited
 openclaw gateway restart
 ```
 
-#### Windows (PowerShell)
+**Windows** – use Option 1 (environment variables) and make them permanent via System Properties or `$PROFILE`.
 
-```powershell
-$env:GMAIL_APP_PASSWORD = "xxxx xxxx xxxx xxxx"
-$env:GMAIL_ACCOUNT = "you@gmail.com"
-$env:EMAIL_FROM = "you@gmail.com"
-openclaw gateway restart
-```
-
-To make them permanent, add the variables in **System Properties → Environment Variables**, or put the lines in your PowerShell profile (`$PROFILE`).
+---
 
 ### Getting the Keys
 
@@ -289,13 +306,13 @@ If a skill shows ❌, set the corresponding credentials and restart the gateway.
 
 ## Troubleshooting Setup
 
-| Issue                     | Fix                                                                          |
-|---------------------------|------------------------------------------------------------------------------|
-| "Can't connect to server" | Check server URL is correct + reachable                                      |
-| "Admin login failed"      | Verify admin username/password; try deleting `admin.json` and re-running setup |
-| "Bot creation failed"     | Check you have admin rights; try manual `!add-bot` after setup               |
-| "2FA keeps failing"       | Check TOTP app time is synced; email OTP expires after ~5 min                |
-| Email send/fetch fails    | Run `!configure` and confirm both Show ✅. Restart gateway after changing credentials |
+| Issue                     | Fix                                                                                  |
+| ------------------------- | ------------------------------------------------------------------------------------ |
+| "Can't connect to server" | Check server URL is correct + reachable                                              |
+| "Admin login failed"      | Verify admin username/password; try deleting `admin.json` and re-running setup       |
+| "Bot creation failed"     | Check you have admin rights; try manual `!add-bot` after setup                       |
+| "2FA keeps failing"       | Check TOTP app time is synced; email OTP expires after ~5 min                        |
+| Email send/fetch fails    | Run `!configure` and confirm both show ✅. Restart gateway after changing credentials |
 
 ---
 
@@ -330,12 +347,12 @@ If a skill shows ❌, set the corresponding credentials and restart the gateway.
 **access.db** — stores access grants:
 
 ```sql
-meta (key TEXT PRIMARY KEY, value TEXT)          -- schema version
+meta (key TEXT PRIMARY KEY, value TEXT) -- schema version
 grants (
   account_id TEXT NOT NULL,
-  room_id    TEXT NOT NULL,
-  room_name  TEXT,
-  username   TEXT NOT NULL,
+  room_id TEXT NOT NULL,
+  room_name TEXT,
+  username TEXT NOT NULL,
   granted_by TEXT,
   granted_at INTEGER NOT NULL,
   PRIMARY KEY (account_id, room_id, username)
@@ -345,9 +362,10 @@ grants (
 **<botId>.db** — stores message dedup + errors:
 
 ```sql
-meta            (key, value)                      -- schema version
-seen_messages   (id TEXT PRIMARY KEY)             -- dedup: message ID → processed
-failed_messages (message_id, room_id, reason)     -- debugging: what went wrong
+meta (key, value) -- schema version
+seen_messages (id TEXT PRIMARY KEY) -- dedup: message ID → processed
+failed_messages (message_id, room_id, reason) -- debugging: what went wrong
 ```
 
 Limits: 250 seen messages, 100 failed records per bot (auto-pruned).
+```
