@@ -65,8 +65,8 @@ You should see `gateway - online` and `runtime - ready`.
 
 | Doc | Description |
 |-----|-------------|
-| [SETUP.md](./SETUP.md) | Full installation, credentials & email setup |
-| [ARCHITECTURE.md](./ARCHITECTURE.md) | How the plugin works (DDP + REST, multi-bot, security) |
-| [COMMANDS.md](./COMMANDS.md) | Complete command reference |
+| [SETUP.md](./docs/SETUP.md) | Full installation, credentials & email setup |
+| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | How the plugin works (DDP + REST, multi-bot, security) |
+| [COMMANDS.md](./docs/COMMANDS.md) | Complete command reference |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contributors guide |
 

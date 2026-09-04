@@ -5,8 +5,8 @@ Thanks for helping! Here's how to get started.
 ## Setup
 
 ```bash
-git clone https://github.com/RocketChat/OpenClaw.Plugin.git
-cd OpenClaw.Plugin
+git clone https://github.com/RocketChat/Openclaw.git
+cd Openclaw
 corepack enable
 pnpm install
 ```
@@ -40,4 +40,4 @@ pnpm run format:check    # Code styled?
 - [ ] Changes tested manually (if adding features)
 - [ ] README updated (if user-facing change)
 
-Questions? See [ARCHITECTURE.md](../docs/ARCHITECTURE.md) for how it all connects.
+Questions? See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for how it all connects.
