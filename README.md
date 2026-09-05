@@ -14,11 +14,11 @@ Connect your Rocket.Chat server directly to OpenClaw agents—no bridge server n
 - OpenClaw installed and configured with an AI provider
 - A default agent already set up
 
-> **Having issues?** Check [`openclaw.example.json`](./openclaw.example.json) in the repo root for a complete annotated configuration reference. You can also manually edit `~/.openclaw/openclaw.json` if needed.
+> **Having issues?** Check [`openclaw.example.json`](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/openclaw.examples.json) in the repo root for a complete annotated configuration reference. You can also manually edit `~/.openclaw/openclaw.json` if needed.
 
 ## Quick Start
 
-Checkout : [SETUP.md](./docs/SETUP.md) Full installation, credentials & email setup
+Checkout : [SETUP.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/docs/SETUP.md) Full installation, credentials & email setup
 
 ```bash
 openclaw plugins install clawhub:@dodaa08/openclaw-plugin-test
@@ -66,7 +66,7 @@ You should see `gateway - online` and `runtime - ready`.
 
 | Doc                                       | Description                                            |
 | ----------------------------------------- | ------------------------------------------------------ |
-| [SETUP.md](./docs/SETUP.md)               | Full installation, credentials & email setup           |
-| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | How the plugin works (DDP + REST, multi-bot, security) |
-| [COMMANDS.md](./docs/COMMANDS.md)         | Complete command reference                             |
-| [CONTRIBUTING.md](CONTRIBUTING.md)        | Contributors guide                                     |
+| [SETUP.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/docs/SETUP.md)               | Full installation, credentials & email setup           |
+| [ARCHITECTURE.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/docs/ARCHITECTURE.md) | How the plugin works (DDP + REST, multi-bot, security) |
+| [COMMANDS.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/docs/COMMANDS.md)         | Complete command reference                             |
+| [CONTRIBUTING.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/CONTRIBUTING.md)      | Contributors guide                                     |
