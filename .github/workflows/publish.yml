@@ -2,6 +2,8 @@ name: Publish to ClawHub
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
 
@@ -9,7 +11,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -37,20 +39,44 @@ jobs:
       - name: Authenticate with ClawHub
         env:
           CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
-        run: clawhub login --token "$CLAWHUB_TOKEN"
+        run: pnpm dlx clawhub login --token "$CLAWHUB_TOKEN"
 
-      # Publish to ClawHub
-      - name: Publish to ClawHub
+      # Compare package.json version against the current ClawHub latest;
+      # only publish when the version actually changed (skips duplicates).
+      - name: Check for new version
+        id: check
         run: |
-          clawhub package publish . \
+          CURRENT=$(node -p "require('./package.json').version")
+          LATEST=$(pnpm dlx clawhub package inspect @dodaa08/openclaw-plugin-test --json 2>/dev/null |
+            node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{try{const j=JSON.parse(d.trim());console.log(j.package&&j.package.latestVersion?j.package.latestVersion:'')}catch{console.log('')}})")
+          SHOULD=$(node -e '
+            const c = process.argv[1].split(".").map(Number);
+            const l = (process.argv[2] || "").split(".").filter(Boolean).map(Number);
+            if (!l.length) { console.log("true"); process.exit(0); }
+            for (let i = 0; i < 3; i++) {
+              if ((c[i] || 0) > (l[i] || 0)) { console.log("true"); process.exit(0); }
+              if ((c[i] || 0) < (l[i] || 0)) { console.log("false"); process.exit(0); }
+            }
+            console.log("false");
+          ' "$CURRENT" "$LATEST")
+          echo "current=$CURRENT latest=$LATEST publish_new=$SHOULD"
+          echo "should_publish=$SHOULD" >> "$GITHUB_OUTPUT"
+
+      # Publish to ClawHub (always on a version tag, only on new versions otherwise)
+      - name: Publish to ClawHub
+        id: publish
+        if: ${{ startsWith(github.ref, 'refs/tags/') || steps.check.outputs.should_publish == 'true' }}
+        run: |
+          pnpm dlx clawhub package publish . \
             --owner @dodaa08 \
             --source-repo RocketChat/OpenClaw.Plugin \
             --source-commit ${{ github.sha }} \
             --source-ref ${{ github.ref_name }} \
             --wait
 
-      # Create GitHub release (optional but nice)
+      # Create GitHub release (optional but nice, only for version tags)
       - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
           body: "Published as version ${{ github.ref_name }} to ClawHub"
