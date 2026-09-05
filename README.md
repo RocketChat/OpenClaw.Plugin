@@ -64,8 +64,8 @@ You should see `gateway - online` and `runtime - ready`.
 
 ## Documentation
 
-| Doc                                       | Description                                            |
-| ----------------------------------------- | ------------------------------------------------------ |
+| Doc                                                                                             | Description                                            |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | [SETUP.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/docs/SETUP.md)               | Full installation, credentials & email setup           |
 | [ARCHITECTURE.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/docs/ARCHITECTURE.md) | How the plugin works (DDP + REST, multi-bot, security) |
 | [COMMANDS.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/docs/COMMANDS.md)         | Complete command reference                             |
