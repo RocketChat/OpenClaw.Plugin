@@ -18,7 +18,7 @@ Connect your Rocket.Chat server directly to OpenClaw agents—no bridge server n
 
 ## Quick Start
 
-Checkout : [SETUP.md](./docs/SETUP.md) Full installation, credentials & email setup
+Checkout : [SETUP.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/docs/SETUP.md) Full installation, credentials & email setup
 
 ```bash
 openclaw plugins install clawhub:@dodaa08/openclaw-plugin-test
@@ -64,9 +64,9 @@ You should see `gateway - online` and `runtime - ready`.
 
 ## Documentation
 
-| Doc                                       | Description                                            |
-| ----------------------------------------- | ------------------------------------------------------ |
-| [SETUP.md](./docs/SETUP.md)               | Full installation, credentials & email setup           |
-| [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | How the plugin works (DDP + REST, multi-bot, security) |
-| [COMMANDS.md](./docs/COMMANDS.md)         | Complete command reference                             |
-| [CONTRIBUTING.md](CONTRIBUTING.md)        | Contributors guide                                     |
+| Doc                                                                                             | Description                                            |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| [SETUP.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/docs/SETUP.md)               | Full installation, credentials & email setup           |
+| [ARCHITECTURE.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/docs/ARCHITECTURE.md) | How the plugin works (DDP + REST, multi-bot, security) |
+| [COMMANDS.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/docs/COMMANDS.md)         | Complete command reference                             |
+| [CONTRIBUTING.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/CONTRIBUTING.md)      | Contributors guide                                     |
