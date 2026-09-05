@@ -2,7 +2,7 @@
   "id": "rocketchat",
   "name": "Rocket.Chat",
   "description": "Rocket.Chat channel plugin with DDP/websocket outbound/inbound",
-  "version": "1.0.0",
+  "version": "1.2.1",
   "kind": "channel",
   "channels": [
     "rocketchat"
@@ -128,6 +128,37 @@
               ],
               "additionalProperties": false
             }
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "maxAccounts": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 50
+              },
+              "maxBotsPerServer": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 25
+              },
+              "botCreationCooldownMs": {
+                "type": "integer",
+                "minimum": 5000,
+                "maximum": 9007199254740991
+              },
+              "maxReconnects": {
+                "type": "integer",
+                "exclusiveMinimum": 0,
+                "maximum": 100
+              },
+              "maxConcurrentTurns": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 32
+              }
+            },
+            "additionalProperties": false
           }
         },
         "required": [

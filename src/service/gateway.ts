@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { resolveOpenClawDir, extractQuotedMessageId, DM_SCOPE } from "../utils.js";
 import { RocketChatClient } from "../client/rest.js";
 import { parsePluginConfig } from "../config/schema.js";
@@ -11,6 +12,7 @@ import type {
 } from "../types.js";
 import { shouldHandleInboundEvent, matchCommand } from "./channel.js";
 import { readAccount } from "../cli/config-updater.js";
+import { collectBotUserIdsForServer, collectBotUsernamesForServer } from "../cli/config-updater.js";
 import { AccessStore } from "../config/access-store.js";
 import { appendGroupHistory, getAndClearGroupHistory } from "./group-history.js";
 import { dispatchInboundEventWithChannelRuntime } from "./inbound.js";
@@ -30,6 +32,22 @@ const MAX_ATTACHMENTS = 5;
 import { activeClients, connectionStatus, type ClientEntry } from "./runtime-state.js";
 export { activeClients, type ClientEntry } from "./runtime-state.js";
 let nextGeneration = 0;
+
+const threadRoots = new Map<string, string>();
+const THREAD_ROOTS_CAP = 2000;
+
+function recordThreadRoot(messageId: string, tmid: string): void {
+  if (threadRoots.size >= THREAD_ROOTS_CAP) {
+    const oldest = threadRoots.keys().next().value;
+    if (oldest !== undefined) threadRoots.delete(oldest);
+  }
+  threadRoots.set(messageId, tmid);
+  threadRoots.set(tmid, tmid);
+}
+
+export function lookupThreadRoot(messageId: string): string | undefined {
+  return threadRoots.get(messageId);
+}
 
 let logger: { info: (msg: string) => void; error: (msg: string) => void } = {
   info: (msg: string) => console.log(`[RC] ${msg}`),
@@ -61,8 +79,38 @@ async function handleMessage(
   identityUsername: string,
   isCommand: boolean,
   commandText: string | null,
+  owner?: string,
 ): Promise<void> {
-  const replyTmid = event.tmid ?? undefined;
+  if (isSenderDenied(event.senderName, owner, accountId, event.roomId, event.roomType)) {
+    const ownerLabel = owner ? `@${owner}` : "the bot owner";
+    const replyText = `You don't have access to use this bot. Contact ${ownerLabel}.`;
+    try {
+      await postMessageWithRetry(
+        client,
+        accountId,
+        event.roomId,
+        replyText,
+        resolveReplyTmid({
+          roomType: event.roomType,
+          tmid: event.tmid ?? undefined,
+          messageId: event.messageId,
+          isCommand: true,
+        }),
+      );
+    } catch (err) {
+      logger.error(
+        `[rocketchat:${accountId}] access denied reply failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    return;
+  }
+
+  const replyTmid = resolveReplyTmid({
+    roomType: event.roomType,
+    tmid: event.tmid ?? undefined,
+    messageId: event.messageId,
+    isCommand,
+  });
   const channelRuntime = ctx.channelRuntime;
   if (!channelRuntime) return;
 
@@ -94,7 +142,18 @@ async function handleMessage(
     channelRuntime,
     client,
     deliver: (payload, info) =>
-      sendReply(client, ddp, event.roomId, event.messageId, replyTmid, accountId, payload, info, isCommand, commandText),
+      sendReply(
+        client,
+        ddp,
+        event.roomId,
+        event.messageId,
+        replyTmid,
+        accountId,
+        payload,
+        info,
+        isCommand,
+        commandText,
+      ),
     onRecordError: (error) => {
       logger.error(
         `[rocketchat:${accountId}] failed to record inbound session: ${error instanceof Error ? error.message : String(error)}`,
@@ -111,12 +170,53 @@ async function handleMessage(
 }
 
 const OPENCLAW_CMD_NAMES = [
-  "acp", "activation", "agents", "approve", "btw", "commands", "compact", "config",
-  "context", "debug", "diagnostics", "elevated", "exec", "export-session",
-  "export-trajectory", "fast", "focus", "goal", "help", "learn", "login", "mcp",
-  "models", "model", "name", "new", "plugins", "queue", "reasoning", "reset",
-  "restart", "send", "session", "skill", "status", "steer", "stop", "subagents",
-  "tasks", "think", "tools", "trace", "tts", "unfocus", "usage", "verbose", "whoami",
+  "acp",
+  "activation",
+  "agents",
+  "approve",
+  "btw",
+  "commands",
+  "compact",
+  "config",
+  "context",
+  "debug",
+  "diagnostics",
+  "elevated",
+  "exec",
+  "export-session",
+  "export-trajectory",
+  "fast",
+  "focus",
+  "goal",
+  "help",
+  "learn",
+  "login",
+  "mcp",
+  "models",
+  "model",
+  "name",
+  "new",
+  "plugins",
+  "queue",
+  "reasoning",
+  "reset",
+  "restart",
+  "send",
+  "session",
+  "skill",
+  "status",
+  "steer",
+  "stop",
+  "subagents",
+  "tasks",
+  "think",
+  "tools",
+  "trace",
+  "tts",
+  "unfocus",
+  "usage",
+  "verbose",
+  "whoami",
 ].join("|");
 const OPENCLAW_CMD_RE = new RegExp(`(?<![\\w/])/(${OPENCLAW_CMD_NAMES})(?![\\w-])`, "g");
 
@@ -179,7 +279,10 @@ function reformatTools(text: string): string {
       }
       out.push(lines[i]!);
     }
-    return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+    return out
+      .join("\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
   }
 
   // Verbose: one clean block per tool.
@@ -221,20 +324,134 @@ function reformatTools(text: string): string {
     }
   }
   flush();
-  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return out
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function reformatModel(text: string): string {
+  try {
+    const cli = execFileSync("openclaw", ["models", "list", "--json"], {
+      encoding: "utf8",
+      timeout: 8000,
+    });
+    const parsed = JSON.parse(cli) as {
+      models?: Array<{ key: string; tags?: string[] }>;
+    };
+    const models = parsed.models;
+    if (Array.isArray(models) && models.length > 0) {
+      const current = models.find((m) => m.tags?.includes("default"));
+      const available = models.filter((m) => !m.tags?.includes("default"));
+      const out: string[] = [];
+      if (current) out.push(`Current: ${shortModelId(current.key)}`);
+      if (available.length) {
+        out.push("", "Available:");
+        for (const m of available) out.push(`  ${shortModelId(m.key)}`);
+      }
+      if (out.length) return out.join("\n");
+    }
+  } catch {
+    // fallback to regex filtering on raw text if JSON path fails
+  }
+
+  const lines = text.split("\n");
+  const out: string[] = [];
+  let current = "";
+  const models: string[] = [];
+  const SENSITIVE =
+    /api[_-]?key|secret|password|oauth|token|credential|bearer|authorization/i;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (SENSITIVE.test(line)) continue;
+    const cur = line.match(/^(?:Current|Default)\s*:\s*(\S+)/i);
+    if (cur) {
+      current = shortModelId(cur[1]!);
+      continue;
+    }
+    if (/^[\w.\-]+\/[\w.\-]+(?:\/[\w.\-]+)*$/.test(line) || /^-\s+[\w.\-]+\//.test(line)) {
+      models.push(shortModelId(line.replace(/^-\s+/, "")));
+      continue;
+    }
+  }
+  if (current) out.push(`Current: ${current}`);
+  if (models.length) {
+    out.push("", "Available:");
+    for (const m of models) out.push(`  ${m}`);
+  }
+  return out.length ? out.join("\n") : text;
 }
 
 function reformatCommandReply(command: string | null, text: string): string {
   if (!command || !text) return text;
   let out = text.replace(OPENCLAW_CMD_RE, "!$1");
-  // Tidy the model card: show a short model id on the Current line.
+  // Tidy the model card: keep the current model + a clean available list.
   if (command.startsWith("/model")) {
-    out = out.replace(/^Current:\s*(\S+)/m, (_m, id: string) => `Current: ${shortModelId(id)}`);
+    const modelArg = command.replace(/^\/model\s*/i, "").trim().toLowerCase();
+    const wantsList = modelArg === "" || modelArg === "status" || modelArg === "list";
+    if (wantsList) {
+      try {
+        const cli = execFileSync("openclaw", ["models"], {
+          encoding: "utf8",
+          timeout: 8000,
+        });
+        out = reformatModel(cli);
+      } catch {
+        out = reformatModel(out);
+      }
+    } else {
+      out = reformatModel(out);
+    }
   }
   if (command.startsWith("/tools")) {
     out = reformatTools(out);
   }
+  out = stripEmojis(out);
   return out;
+}
+
+const EMOJI_RE =
+  /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{1F1E6}-\u{1F1FF}\u{FE00}-\u{FE0F}\u{2190}-\u{21FF}\u{2300}-\u{23FF}\u{2460}-\u{24FF}\u{25A0}-\u{25FF}\u{2900}-\u{297F}\u{2022}\u{00B7}]/gu;
+
+function stripEmojis(text: string): string {
+  return text.replace(EMOJI_RE, "").replace(/[ \t]{2,}/g, " ").trim();
+}
+
+const SEND_RETRY_DELAY_MS = 500;
+
+export async function postMessageWithRetry(
+  client: Pick<RocketChatClient, "postMessage">,
+  accountId: string,
+  roomId: string,
+  text: string,
+  tmid?: string,
+): Promise<string> {
+  const tmidOpt = tmid ? { tmid } : undefined;
+  try {
+    return await client.postMessage(roomId, text, tmidOpt);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    logger.info(
+      `[rocketchat:${accountId}] send failed, retrying in ${SEND_RETRY_DELAY_MS}ms: ${reason}`,
+    );
+    await new Promise((resolve) => setTimeout(resolve, SEND_RETRY_DELAY_MS));
+    return await client.postMessage(roomId, text, tmidOpt);
+  }
+}
+
+export function resolveReplyTmid(params: {
+  roomType: string;
+  tmid?: string | undefined;
+  messageId: string;
+  isCommand: boolean;
+  command?: string | undefined;
+}): string | undefined {
+  if (params.tmid) return params.tmid;
+  if (!params.isCommand) return undefined;
+  if (params.roomType === "direct") return undefined;
+  if (params.command === "help") return undefined;
+  return params.messageId;
 }
 
 async function sendReply(
@@ -268,8 +485,10 @@ async function sendReply(
     await ddp?.sendTyping(roomId, false).catch(() => {});
   }
 
-  const sendMsg = client.postMessage.bind(client);
+  const sendMsg = (roomId: string, text: string, options?: { tmid?: string }) =>
+    postMessageWithRetry(client, accountId, roomId, text, options?.tmid);
   const tmidOpt = replyTmid ? { tmid: replyTmid } : undefined;
+  logger.info(`[rocketchat:${accountId}] reply tmid=${replyTmid ?? "none"} text="${text.slice(0, 60)}"`);
 
   try {
     if (payload.attachmentPath) {
@@ -335,6 +554,9 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
     auth: account.auth,
   });
 
+  const knownBotUserIds = collectBotUserIdsForServer(account.serverUrl);
+  client.setBotUsernames(collectBotUsernamesForServer(account.serverUrl));
+
   const identity = await client.getIdentity();
   const generation = nextGeneration++;
   ctx.setStatus?.("connected");
@@ -345,7 +567,16 @@ export async function startGateway(ctx: GatewayContext): Promise<void> {
   const checkpoint = new CheckpointStore(checkpointPath, 250);
   const mentionNames = dedupeMentions([identity.username, ...account.mentionNames]);
 
-  return startDdpGateway(ctx, account, identity, client, checkpoint, mentionNames, generation);
+  return startDdpGateway(
+    ctx,
+    account,
+    identity,
+    client,
+    checkpoint,
+    mentionNames,
+    generation,
+    knownBotUserIds,
+  );
 }
 
 async function startDdpGateway(
@@ -356,6 +587,7 @@ async function startDdpGateway(
   checkpoint: CheckpointStore,
   mentionNames: string[],
   generation: number,
+  knownBotUserIds: Set<string>,
 ): Promise<void> {
   const accountId = account.accountId;
   const wsBase = new URL(account.serverUrl);
@@ -363,6 +595,7 @@ async function startDdpGateway(
   const wsUrl = wsBase.toString().replace(/\/+$/, "");
   const reconnectDelayMs =
     account.transport.mode === "websocket" ? (account.transport.reconnectDelayMs ?? 2_000) : 2_000;
+  const channelLimits = parseChannelConfig(ctx.cfg ?? {}).limits;
 
   const stateData = await checkpoint.read();
   const seenIds = new Set(stateData.recentMessageIds);
@@ -394,8 +627,14 @@ async function startDdpGateway(
     authToken: identity.authToken,
     username: identity.username,
     reconnectDelayMs,
+    maxReconnects: channelLimits?.maxReconnects,
     onStatus: (status) => {
       connectionStatus.set(accountId, status);
+      if (status === "failed") {
+        logger.error(
+          `[rocketchat:${accountId}] connection gave up - bot is dead until daemon restart (run: openclaw daemon restart)`,
+        );
+      }
       logger.info(`[rocketchat:${accountId}] ddp status: ${status}`);
     },
     onError: (error) => logger.error(`[rocketchat:${accountId}] ddp error: ${error.message}`),
@@ -420,7 +659,7 @@ async function startDdpGateway(
       const sub: RocketChatSubscriptionRecord = { rid: msg.rid, t: roomType ?? "c" };
       const event = await toInboundEvent(accountId, sub, msg, account.serverUrl, client);
       logger.info(
-        `[rocketchat:${accountId}] inbound from ${event.senderName}: "${event.text.slice(0, 80)}"`,
+        `[rocketchat:${accountId}] inbound from ${event.senderName}: "${event.text.slice(0, 80)}" (tmid=${event.tmid ?? "none"})`,
       );
       if (event.quotedText) {
         logger.info(
@@ -428,7 +667,13 @@ async function startDdpGateway(
         );
       }
 
-      if (!shouldHandleInboundEvent(event, { botUserId: identity.userId, mentionNames })) {
+      if (
+        !shouldHandleInboundEvent(event, {
+          botUserId: identity.userId,
+          mentionNames,
+          knownBotUserIds,
+        })
+      ) {
         if (event.roomType !== "direct") {
           appendGroupHistory(accountId, event.roomId, {
             sender: event.senderName,
@@ -439,13 +684,26 @@ async function startDdpGateway(
         return;
       }
 
-      if (isSenderDenied(event.senderName, account.owner, accountId, event.roomId, event.roomType)) {
-        const sendCmd = client.postMessage.bind(client);
-        const tmidOpt = event.tmid ? { tmid: event.tmid } : undefined;
+      await markSeen(msg._id);
+
+      if (
+        isSenderDenied(event.senderName, account.owner, accountId, event.roomId, event.roomType)
+      ) {
         const ownerLabel = account.owner ? `@${account.owner}` : "the bot owner";
-        const replyText = `**@${event.senderName}**: You don't have access to use this bot. Contact ${ownerLabel}.`;
+        const replyText = `You don't have access to use this bot. Contact ${ownerLabel}.`;
         try {
-          await sendCmd(event.roomId, replyText, tmidOpt);
+          await postMessageWithRetry(
+            client,
+            accountId,
+            event.roomId,
+            replyText,
+            resolveReplyTmid({
+              roomType: event.roomType,
+              tmid: event.tmid ?? undefined,
+              messageId: event.messageId,
+              isCommand: true,
+            }),
+          );
         } catch (err) {
           logger.error(
             `[rocketchat:${accountId}] access denied reply failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -462,6 +720,7 @@ async function startDdpGateway(
           serverUrl: account.serverUrl,
           mentionNames: account.mentionNames,
           auth: { mode: "token", userId: "", accessToken: "" },
+          enabled: true,
           ...(account.owner ? { owner: account.owner } : {}),
         },
         client,
@@ -469,15 +728,29 @@ async function startDdpGateway(
         roomId: event.roomId,
         roomType: event.roomType,
         ...(ctx.channelRuntime ? { channelRuntime: ctx.channelRuntime } : {}),
+        ...(channelLimits
+          ? {
+              limits: {
+                maxAccounts: channelLimits.maxAccounts,
+                maxBotsPerServer: channelLimits.maxBotsPerServer,
+                botCreationCooldownMs: channelLimits.botCreationCooldownMs,
+              },
+            }
+          : {}),
       });
       logger.info(
         `[rocketchat:${accountId}] matchCommand(${JSON.stringify(event.text)}) -> ${cmdResult.action}`,
       );
       if (cmdResult.action === "reply") {
-        const sendCmd = client.postMessage.bind(client);
-        const tmidOpt = event.tmid ? { tmid: event.tmid } : undefined;
+        const tmid = resolveReplyTmid({
+          roomType: event.roomType,
+          tmid: event.tmid ?? undefined,
+          messageId: event.messageId,
+          isCommand: true,
+          command: cmdResult.command,
+        });
         try {
-          await sendCmd(event.roomId, cmdResult.replyText, tmidOpt);
+          await postMessageWithRetry(client, accountId, event.roomId, cmdResult.replyText, tmid);
         } catch (err) {
           logger.error(
             `[rocketchat:${accountId}] command reply failed: ${err instanceof Error ? err.message : String(err)}`,
@@ -489,9 +762,7 @@ async function startDdpGateway(
 
       if (cmdResult.action === "openclaw-command") {
         event.text = cmdResult.command;
-        logger.info(
-          `[rocketchat:${accountId}] passthrough OpenClaw command: ${cmdResult.command}`,
-        );
+        logger.info(`[rocketchat:${accountId}] passthrough OpenClaw command: ${cmdResult.command}`);
       }
 
       await markSeen(msg._id);
@@ -505,24 +776,34 @@ async function startDdpGateway(
 
       if (processingMessages.has(msg._id)) return;
       processingMessages.add(msg._id);
-      try {
-        await handleMessage(ctx, event, client, connection, accountId, identity.username, cmdResult.action === "openclaw-command", cmdResult.action === "openclaw-command" ? event.text : null);
-      } catch (err) {
-        const reason = err instanceof Error ? err.message : String(err);
-        logger.error(
-          `[rocketchat:${accountId}] failed to handle message ${event.messageId}: ${reason}`,
-        );
-        await checkpoint.recordFailure({
-          messageId: event.messageId,
-          roomId: event.roomId,
-          senderName: event.senderName,
-          sentAt: event.sentAt,
-          failedAt: new Date().toISOString(),
-          reason,
+      void handleMessage(
+        ctx,
+        event,
+        client,
+        connection,
+        accountId,
+        identity.username,
+        cmdResult.action === "openclaw-command",
+        cmdResult.action === "openclaw-command" ? event.text : null,
+        account.owner,
+      )
+        .catch(async (err) => {
+          const reason = err instanceof Error ? err.message : String(err);
+          logger.error(
+            `[rocketchat:${accountId}] failed to handle message ${event.messageId}: ${reason}`,
+          );
+          await checkpoint.recordFailure({
+            messageId: event.messageId,
+            roomId: event.roomId,
+            senderName: event.senderName,
+            sentAt: event.sentAt,
+            failedAt: new Date().toISOString(),
+            reason,
+          });
+        })
+        .finally(() => {
+          processingMessages.delete(msg._id);
         });
-      } finally {
-        processingMessages.delete(msg._id);
-      }
     },
   });
 
@@ -601,6 +882,7 @@ async function toInboundEvent(
   client: RocketChatClient | null,
 ): Promise<InboundEvent> {
   const rawAttachments = getMessageAttachmentInputs(msg);
+  if (msg.tmid) recordThreadRoot(msg._id, msg.tmid);
 
   let quotedText: string | undefined;
   let nextQuotedId: string | null = msg.tmid ?? null;
@@ -663,16 +945,6 @@ function mapRoomType(t: string | undefined): InboundEvent["roomType"] {
   return "channel";
 }
 
-const PROCESSING_EMOJIS = [
-  ":eyes:",
-  ":thinking:",
-  ":hourglass:",
-  ":gear:",
-  ":robot:",
-  ":arrows_counterclockwise:",
-  ":bulb:",
-  ":mag:",
-];
 
 function dedupeMentions(mentions: string[]): string[] {
   return [...new Set(mentions.map((mention) => mention.trim()).filter(Boolean))];
@@ -688,3 +960,14 @@ function parseChannelConfig(cfg: OpenClawConfig): ReturnType<typeof parsePluginC
 function isPluginConfigLike(input: unknown): input is Parameters<typeof parsePluginConfig>[0] {
   return Boolean(input && typeof input === "object" && "accounts" in input);
 }
+
+const PROCESSING_EMOJIS = [
+  ":eyes:",
+  ":thinking:",
+  ":hourglass:",
+  ":gear:",
+  ":robot:",
+  ":arrows_counterclockwise:",
+  ":bulb:",
+  ":mag:",
+];

@@ -11,9 +11,6 @@ importers:
       '@clack/prompts':
         specifier: ^1.7.0
         version: 1.7.0
-      '@rocket.chat/ddp-client':
-        specifier: ^1.1.1
-        version: 1.1.1(@rocket.chat/emitter@0.33.0)(@rocket.chat/icons@0.48.0)
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -27,12 +24,21 @@ importers:
         specifier: ^4.4.3
         version: 4.4.3
     devDependencies:
+      '@clack/core':
+        specifier: 1.4.3
+        version: 1.4.3
+      '@rocket.chat/ddp-client':
+        specifier: ^1.1.1
+        version: 1.1.1(@rocket.chat/emitter@0.33.0)(@rocket.chat/icons@0.48.0)
       '@types/node':
         specifier: ^25.9.1
         version: 25.9.5
       '@types/ws':
         specifier: ^8.18.1
         version: 8.18.1
+      esbuild:
+        specifier: ^0.28.1
+        version: 0.28.1
       openclaw:
         specifier: ^2026.7.1-2
         version: 2026.7.1-2

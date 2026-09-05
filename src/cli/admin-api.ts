@@ -2,6 +2,22 @@ import { RocketChatClientError } from "../client/rest.js";
 import { getErrorMessage } from "../utils.js";
 import type { RCLoginResult, RCUser, JsonObject } from "../types.js";
 
+const REQUEST_TIMEOUT_MS = 15_000;
+
+export function isTimeoutError(e: unknown): boolean {
+  return e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError");
+}
+
+function fetchWithTimeout(
+  url: string | URL,
+  init: RequestInit = {},
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...init, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
 function extractRecord(json: JsonObject, field: string): Record<string, unknown> {
   const value = json[field];
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -36,7 +52,7 @@ async function adminFetch(
     headers["X-Auth-Token"] = opts.authToken;
     headers["X-User-Id"] = opts.userId;
   }
-  const res = await fetch(new URL(path, baseUrl), {
+  const res = await fetchWithTimeout(new URL(path, baseUrl), {
     method: opts.method ?? "POST",
     headers,
     ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
@@ -75,8 +91,7 @@ function parseLoginChallenge(json: JsonObject): LoginChallenge | null {
   // never sent (e.g. a bot account without 2FA provisioned).
   const explicitChallenge =
     /^(totp-required|code-required|email-required|totp-invalid|code-invalid)$/i.test(errorType) ||
-    (status === "error" &&
-      /(two-factor|verification code|2fa|totp|enter the code)/i.test(message));
+    (status === "error" && /(two-factor|verification code|2fa|totp|enter the code)/i.test(message));
 
   if (!explicitChallenge) return null;
 
@@ -182,7 +197,12 @@ export async function getUserInfo(
       authToken: auth.authToken,
     });
     const user = json.user as RCUser;
-    return { _id: user._id, username: user.username, name: user.name };
+    return {
+      _id: user._id,
+      username: user.username,
+      name: user.name,
+      ...(Array.isArray(user.roles) ? { roles: user.roles } : {}),
+    };
   } catch {
     return null;
   }
@@ -284,6 +304,7 @@ export async function getGroupByName(
   baseUrl: string,
   auth: RCLoginResult,
   name: string,
+  reasons?: string[],
 ): Promise<RocketChatGroup | null> {
   for (const endpoint of ["/api/v1/groups.info", "/api/v1/channels.info"]) {
     try {
@@ -299,7 +320,9 @@ export async function getGroupByName(
       if (group?._id) {
         return { _id: group._id, name: group.name ?? name, isPrivate: group.t === "p" };
       }
-    } catch {}
+    } catch (e: unknown) {
+      reasons?.push(`${endpoint}: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
   return null;
 }
@@ -321,7 +344,9 @@ export async function inviteToGroup(
 
 export async function checkServerHealth(baseUrl: string): Promise<boolean> {
   try {
-    const res = await fetch(new URL("/api/info", baseUrl), { method: "GET" });
+    const res = await fetchWithTimeout(new URL("/api/info", baseUrl), {
+      method: "GET",
+    });
     return res.ok;
   } catch {
     return false;

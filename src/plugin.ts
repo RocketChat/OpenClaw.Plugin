@@ -9,7 +9,9 @@ import {
   listAccountIds,
   isConfigured,
   activeClients,
+  lookupThreadRoot,
 } from "./service/gateway.js";
+import { collectBotUsernamesForServer } from "./cli/config-updater.js";
 import type { ResolvedAccount } from "./types.js";
 
 export { startGateway, resolveAccount, listAccountIds, isConfigured };
@@ -21,7 +23,7 @@ export const rocketchatPlugin = createChatChannelPlugin<ResolvedAccount>({
       id: "rocketchat",
       label: "Rocket.Chat",
       selectionLabel: "Rocket.Chat",
-      docsPath: "https://rocket.chat/docs",
+      docsPath: "https://github.com/RocketChat/Openclaw/tree/main/docs",
       blurb: "Rocket.Chat channel plugin with DDP/websocket outbound/inbound",
       aliases: ["rc"],
     },
@@ -109,8 +111,10 @@ export const rocketchatPlugin = createChatChannelPlugin<ResolvedAccount>({
         let client = entry?.client ?? null;
         if (!client) {
           client = new RocketChatClient({ serverUrl: account.serverUrl, auth: account.auth });
+          client.setBotUsernames(collectBotUsernamesForServer(account.serverUrl));
         }
-        const tmidOptions = ctx.replyToId ? { tmid: ctx.replyToId } : undefined;
+        const tmid = ctx.replyToId ? (lookupThreadRoot(ctx.replyToId) ?? ctx.replyToId) : undefined;
+        const tmidOptions = tmid ? { tmid } : undefined;
         const messageId = await client.postMessage(ctx.to, ctx.text, tmidOptions);
         return { channel: "rocketchat", ok: true, messageId };
       },
@@ -129,8 +133,10 @@ export const rocketchatPlugin = createChatChannelPlugin<ResolvedAccount>({
         let client = entry?.client ?? null;
         if (!client) {
           client = new RocketChatClient({ serverUrl: account.serverUrl, auth: account.auth });
+          client.setBotUsernames(collectBotUsernamesForServer(account.serverUrl));
         }
-        const tmidOptions = ctx.replyToId ? { tmid: ctx.replyToId } : undefined;
+        const tmid = ctx.replyToId ? (lookupThreadRoot(ctx.replyToId) ?? ctx.replyToId) : undefined;
+        const tmidOptions = tmid ? { tmid } : undefined;
 
         const urls = ctx.mediaUrl ? [ctx.mediaUrl] : [];
         if (!urls.length) {

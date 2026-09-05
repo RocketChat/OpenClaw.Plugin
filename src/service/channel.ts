@@ -1,12 +1,15 @@
 import type { InboundEvent } from "../types.js";
 import type { ChannelRuleOptions } from "../types.js";
-import { DM_SCOPE } from "../utils.js";
+import { DM_SCOPE, CommandParser } from "../utils.js";
 import { RocketChatClient } from "../client/rest.js";
 import type { RCLoginResult } from "../types.js";
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import {
+  readConfig,
+  readDefaultModel,
+  setDefaultModel,
   readAllAccounts,
   readBindingsForAccount,
   readOwner,
@@ -30,19 +33,65 @@ import {
   getUserInfo,
   inviteToGroup,
   listGroupMembers,
+  type RocketChatGroup,
 } from "../cli/admin-api.js";
-import { loadAdmin } from "../cli/credentials.js";
+import { checkBotCreationLimit, recordBotCreation } from "../cli/rate-limiter.js";
+import { loadAdmin, removeBotCredentials } from "../cli/credentials.js";
 import { startGateway } from "./gateway.js";
 import { activeClients, connectionStatus } from "./runtime-state.js";
 import { AccessStore } from "../config/access-store.js";
+import {
+  runCronCommand,
+  runEmailCommand,
+  runConfigureCommand,
+  CRON_USAGE,
+  CRON_HEADING,
+  EMAIL_USAGE,
+  EMAIL_HEADING,
+  CONFIGURE_USAGE,
+  CONFIGURE_HEADING,
+} from "./skill-commands.js";
 
 const BROADCAST_MENTIONS = new Set(["here", "all", "everyone"]);
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Normalize a room name for comparison: optional leading #, trimmed, lowercased. */
+function normalizeRoomName(name: string): string {
+  return name.replace(/^#+/, "").trim().toLowerCase();
+}
+
+function groupNotFoundText(groupName: string, reasons?: string[]): string {
+  if ((reasons ?? []).some((r) => /discussion/i.test(r))) {
+    return `Group "${groupName}" is a discussion. Lending/inviting bots in discussions isn't supported yet coming soon.`;
+  }
+
+  const forbidden = (reasons ?? []).some((r) =>
+    /not.authorized|not-authorized|forbidden|permission|not.member|not.allowed/i.test(r),
+  );
+
+  let hint: string;
+  if (forbidden) {
+    hint =
+      "exists but requires permission this usually happens with private groups where the acting account isn't a member or lacks permission";
+  } else {
+    hint =
+      "not found this could be a private group the acting account isn't a member of, or a discussion (will be supported soon)";
+  }
+  return `Group "${groupName}" ${hint}.`;
+}
 
 export function shouldHandleInboundEvent(
   event: InboundEvent,
   options: ChannelRuleOptions,
 ): boolean {
   if (event.senderId === options.botUserId) {
+    return false;
+  }
+
+  if (options.knownBotUserIds?.has(event.senderId)) {
     return false;
   }
 
@@ -62,7 +111,11 @@ export function shouldHandleInboundEvent(
 
   const normalizedText = event.text.toLowerCase();
   for (const alias of aliases) {
-    if (normalizedText.includes(`@${alias}`)) return true;
+    // Match the alias as a whole word (e.g. "@ocrcbot") so that a mention of a
+    // different bot does not match a prefix alias (@ocrcbot2 must not match @ocrcbot).
+    if (new RegExp(`(^|[^\\w])@${escapeRegex(alias)}(?![\\w])`, "i").test(normalizedText)) {
+      return true;
+    }
   }
 
   return false;
@@ -76,14 +129,39 @@ export type CommandContext = {
   senderName?: string;
   roomId?: string;
   roomType?: import("../types.js").InboundEvent["roomType"];
+  limits?: {
+    maxAccounts?: number | undefined;
+    maxBotsPerServer?: number | undefined;
+    botCreationCooldownMs?: number | undefined;
+  };
 };
 
 export type CommandResult =
-  | { action: "reply"; replyText: string }
+  | { action: "reply"; replyText: string; command?: string }
   | { action: "passthrough" }
   | { action: "openclaw-command"; command: string };
 
-const COMMAND_RE = /^\s*!(\S+)(?:\s+([\s\S]*))?$/i;
+/**
+ * Commands restricted to the bot owner (`accounts.<id>.owner`). Any other user
+ * with access who tries one of these gets a permission reply and the command is
+ * never executed or forwarded to OpenClaw.
+ */
+const OWNER_ONLY_COMMANDS = new Set([
+  "add-bot",
+  "remove-bot",
+  "add-group",
+  "revoke",
+  "access",
+  "bots",
+  "email",
+  "configure",
+]);
+
+function isOwner(ctx: CommandContext): boolean {
+  const owner = ctx.account.owner?.trim().replace(/^@+/, "").toLowerCase();
+  const actor = ctx.senderName?.trim().replace(/^@+/, "").toLowerCase();
+  return !!owner && !!actor && owner === actor;
+}
 
 export async function matchCommand(text: string, ctx: CommandContext): Promise<CommandResult> {
   const normalized = text
@@ -91,14 +169,27 @@ export async function matchCommand(text: string, ctx: CommandContext): Promise<C
     .replace(/^\s*(@\S+\s+)+/, "")
     .trim()
     .replace(/^!\s+/, "!");
-  const match = normalized.match(COMMAND_RE);
-  if (!match) return { action: "passthrough" };
-  const cmd = match[1]!.toLowerCase();
-  const argStr = match[2] ?? "";
+  const parsed = CommandParser.parse(normalized);
+  if (!parsed) return { action: "passthrough" };
+  const result = await runCommand(parsed.command, parsed.raw, ctx);
+  return result.action === "reply" ? { ...result, command: parsed.command } : result;
+}
+
+async function runCommand(
+  cmd: string,
+  argStr: string,
+  ctx: CommandContext,
+): Promise<CommandResult> {
+  if (OWNER_ONLY_COMMANDS.has(cmd) && !isOwner(ctx)) {
+    return {
+      action: "reply",
+      replyText: `\`!${cmd}\` is owner-only. Contact ${ctx.account.owner ? `@${ctx.account.owner}` : "the bot owner"}.`,
+    };
+  }
 
   switch (cmd) {
     case "help":
-      return { action: "reply", replyText: buildHelpText() };
+      return { action: "reply", replyText: buildHelpText(isOwner(ctx)) };
     case "access":
       return { action: "reply", replyText: await runAccess(ctx) };
     case "bots":
@@ -124,13 +215,40 @@ export async function matchCommand(text: string, ctx: CommandContext): Promise<C
     case "new":
       return { action: "openclaw-command", command: `/new${argStr ? " " + argStr : ""}` };
     case "model":
-      return { action: "openclaw-command", command: `/model${argStr ? " " + argStr : ""}` };
+      return await runModel(argStr);
     case "tools":
       return { action: "openclaw-command", command: `/tools${argStr ? " " + argStr : ""}` };
-    case "skill":
+    case "skill": {
+      const skillName = argStr.trim().split(/\s+/)[0] ?? "";
+      const owner = isOwner(ctx);
+      if (skillName.toLowerCase() === "cron") {
+        return { action: "reply", replyText: [CRON_HEADING, CRON_USAGE].join("\n") };
+      }
+      if (
+        (skillName.toLowerCase() === "email" || skillName.toLowerCase() === "configure") &&
+        !owner
+      ) {
+        return {
+          action: "reply",
+          replyText: `\`!skill ${skillName}\` is owner-only. Contact ${ctx.account.owner ? `@${ctx.account.owner}` : "the bot owner"}.`,
+        };
+      }
+      if (skillName.toLowerCase() === "email") {
+        return { action: "reply", replyText: [EMAIL_HEADING, EMAIL_USAGE].join("\n") };
+      }
+      if (skillName.toLowerCase() === "configure") {
+        return { action: "reply", replyText: [CONFIGURE_HEADING, CONFIGURE_USAGE].join("\n") };
+      }
       return { action: "openclaw-command", command: `/skill${argStr ? " " + argStr : ""}` };
+    }
     case "skills":
-      return { action: "reply", replyText: runSkills() };
+      return { action: "reply", replyText: runSkills(isOwner(ctx)) };
+    case "cron":
+      return { action: "reply", replyText: await runCronCommand(ctx, argStr) };
+    case "email":
+      return { action: "reply", replyText: await runEmailCommand(ctx, argStr) };
+    case "configure":
+      return { action: "reply", replyText: runConfigureCommand() };
     case "think":
       return { action: "openclaw-command", command: `/think${argStr ? " " + argStr : ""}` };
     case "abort":
@@ -147,18 +265,18 @@ export async function matchCommand(text: string, ctx: CommandContext): Promise<C
   }
 }
 
-function buildHelpText(): string {
+function buildHelpText(showAll: boolean): string {
   const groups: Array<[string, Array<[string, string]>]> = [
     [
       "Bot",
       [
         ["help", "this menu"],
-        ["status", "gateway / bot / agent / runtime"],
-        ["bots", "bots + their agents"],
-        ["groups", "groups joined"],
+        ["status", "gateway status"],
+        ["bots", "bots and agents"],
+        ["groups", "groups joined by bots"],
         ["access", "who can use"],
         ["add-bot <user>", "create a bot"],
-        ["remove-bot <user...>", "delete bot(s)"],
+        ["remove-bot <user...>", "delete bot(s); clears config, creds, agent\ngateway auto-restarts; run `openclaw sessions cleanup` for old sessions"],
         ["add-group <group> [bot]", "invite bot to group"],
         ["lend <group> <user>", "grant group access"],
         ["lend dm <user>", "grant DM access"],
@@ -177,13 +295,14 @@ function buildHelpText(): string {
     [
       "Model",
       [
-        ["model [name|#]", "list or switch"],
+        ["model", "show current + list"],
+        ["model set <name>", "switch model"],
       ],
     ],
     [
       "Behavior",
       [
-        ["think <level>", "depth: off..high"],
+        ["think <level>", "off, low, medium, high"],
         ["abort", "stop reply"],
         ["reasoning on/off", "show reasoning"],
         ["verbose on/off", "debug details"],
@@ -199,14 +318,136 @@ function buildHelpText(): string {
     ],
   ];
 
-  const lines: string[] = ["Commands"];
-  for (const [title, cmds] of groups) {
-    lines.push("", `**${title}**`);
+  const visibleGroups = groups
+    .map(
+      ([title, cmds]) =>
+        [
+          title,
+          showAll ? cmds : cmds.filter(([cmd]) => !OWNER_ONLY_COMMANDS.has(cmd.split(/\s/)[0]!)),
+        ] as [string, Array<[string, string]>],
+    )
+    .filter(([, cmds]) => cmds.length > 0);
+
+  const pad = (s: string, n: number): string => s + " ".repeat(Math.max(0, n - s.length));
+  const width = Math.max(
+    0,
+    ...visibleGroups.flatMap(([, cmds]) => cmds.map(([cmd]) => cmd.length)),
+  );
+
+  const descIndent = " ".repeat(width + 5);
+  const lines: string[] = ["Rocket.Chat bot commands:"];
+  for (const [title, cmds] of visibleGroups) {
+    lines.push("", title);
     for (const [cmd, desc] of cmds) {
-      lines.push(`\`!${cmd}\` ${desc}`);
+      const [first, ...rest] = desc.split("\n");
+      lines.push(`  ${pad("!" + cmd, width + 1)}  ${first}`);
+      for (const cont of rest) {
+        lines.push(`${descIndent}${cont}`);
+      }
     }
   }
-  return lines.join("\n");
+  if (!showAll) lines.push("", "owner-only commands hidden - run as owner to see");
+  const footer = "\n\n💡 These commands are for quick, small tasks. For better and more precise results, use direct inbound messages.";
+  return "```\n" + lines.join("\n") + "\n```" + footer;
+}
+
+function shortModelId(full: string): string {
+  return full.split("/").pop() ?? full;
+}
+
+function getUsableModels(): { current: string; usable: string[] } {
+  const defaults = (readConfig() as Record<string, any>)?.agents?.defaults as
+    Record<string, any> | undefined;
+  const models = (defaults?.models ?? {}) as Record<string, unknown>;
+  const usable = Object.keys(models)
+    .filter(Boolean)
+    .sort((a, b) => {
+      const ka = shortModelId(a).toLowerCase();
+      const kb = shortModelId(b).toLowerCase();
+      return ka.localeCompare(kb) || a.localeCompare(b);
+    });
+  return { current: readDefaultModel(), usable };
+}
+
+function shortIdCounts(usable: string[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const m of usable) {
+    const s = shortModelId(m);
+    counts.set(s, (counts.get(s) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function modelLabel(full: string, usable: string[]): string {
+  const s = shortModelId(full);
+  const counts = shortIdCounts(usable);
+  return (counts.get(s) ?? 0) > 1 ? full : s;
+}
+
+function matchingModels(requested: string, usable: string[]): string[] {
+  const q = requested.trim().toLowerCase();
+  if (!q) return [];
+  return usable.filter((m) => m.toLowerCase() === q || shortModelId(m).toLowerCase() === q);
+}
+
+async function runModel(argStr: string): Promise<CommandResult> {
+  const trimmed = argStr.trim();
+  const { current, usable } = getUsableModels();
+
+  if (trimmed) {
+    const requested = /^set\b/i.test(trimmed) ? trimmed.replace(/^set\b/i, "").trim() : trimmed;
+    const matches = matchingModels(requested, usable);
+    if (matches.length === 0) {
+      return {
+        action: "reply",
+        replyText: `Unknown model \`${requested}\`. Run \`!model\` to see the usable models.`,
+      };
+    }
+    if (matches.length > 1) {
+      return {
+        action: "reply",
+        replyText:
+          `\`${requested}\` matches multiple models. Use one of the full ids: ` +
+          matches.map((m) => `\`${m}\``).join(", "),
+      };
+    }
+    const target = matches[0]!;
+    if (target === current) {
+      return {
+        action: "reply",
+        replyText: `Already on \`${modelLabel(target, usable)}\`.`,
+      };
+    }
+    setDefaultModel(target);
+    return {
+      action: "reply",
+      replyText:
+        `Switched model to \`${modelLabel(target, usable)}\`.\n` +
+        "The new default is saved. Start a fresh turn (\`!new\`) for it to apply.",
+    };
+  }
+
+  if (usable.length === 0) {
+    return {
+      action: "reply",
+      replyText: "No usable models found. Configure providers in openclaw.json first.",
+    };
+  }
+
+  const lines = [
+    "**Model**",
+    current ? `- current - ${modelLabel(current, usable)}` : "- current - (not set)",
+    "",
+    "**Usable**",
+    ...usable.map((m) => {
+      const label = modelLabel(m, usable);
+      const mark = current && current === m ? " (current)" : "";
+      return `- \`${label}\`${mark}`;
+    }),
+    "",
+    "Switch: `!model set <name>`",
+  ];
+  return { action: "reply", replyText: lines.join("\n") };
 }
 
 function runBots(): string {
@@ -214,18 +455,19 @@ function runBots(): string {
   if (accounts.length === 0) {
     return "No Rocket.Chat bot accounts configured.";
   }
-
   const lines: string[] = [];
   for (const account of accounts) {
     const mention = account.mentionNames[0] ?? account.accountId;
     const bindings = readBindingsForAccount(account.accountId);
+    const disabled = account.enabled === false ? " (disabled)" : "";
+    const dead = connectionStatus.get(account.accountId) === "failed" ? " (dead)" : "";
     if (bindings.length === 0) {
-      lines.push(`- @${mention} - (no agent bound)`);
+      lines.push(`- ${mention}${disabled}${dead} - (no agent bound)`);
       continue;
     }
     for (const binding of bindings) {
-      const scope = binding.peer ? `${binding.peer.kind} ${binding.peer.id}` : "global";
-      lines.push(`- @${mention} → ${binding.agentId} (${scope})`);
+      const agent = binding.agentId === `rc-${mention}` ? "" : ` → ${binding.agentId}`;
+      lines.push(`- ${mention}${disabled}${dead}${agent}`);
     }
   }
 
@@ -244,7 +486,7 @@ function parseSkillFrontmatter(content: string): { name?: string; description?: 
   return result;
 }
 
-function runSkills(): string {
+function runSkills(showOwnerOnly: boolean): string {
   const skillsDir = resolve(homedir(), ".openclaw", "skills");
   if (!existsSync(skillsDir)) {
     return "No skills installed (expected at ~/.openclaw/skills).";
@@ -274,11 +516,24 @@ function runSkills(): string {
   if (skills.length === 0) {
     return "No skills installed (expected at ~/.openclaw/skills).";
   }
+  const cap = (s: string, n = 80): string => (s.length > n ? s.slice(0, n).trimEnd() + "…" : s);
   const lines = ["**Skills**"];
-  for (const s of skills) {
-    lines.push(`- \`!skill ${s.name}\`${s.description ? ` - ${s.description}` : ""}`);
+  const has = (name: string): boolean => skills.some((s) => s.name === name);
+  lines.push("", CRON_HEADING, CRON_USAGE);
+  if (showOwnerOnly) {
+    if (has("email") || has("agentmail")) {
+      lines.push("", EMAIL_HEADING, EMAIL_USAGE);
+    }
+    lines.push("", CONFIGURE_HEADING, CONFIGURE_USAGE);
   }
-  lines.push("", "Run a skill: `!skill <name>`");
+  for (const s of skills) {
+    if (s.name === "cron" || s.name === "email" || s.name === "agentmail") continue;
+    if (!showOwnerOnly && s.name === "configure") continue;
+    const title = s.name.charAt(0).toUpperCase() + s.name.slice(1);
+    lines.push("", `**${title}**`);
+    lines.push(`• ${s.description ? cap(s.description) : "No description available."}`);
+    lines.push(`• Run with: \`!skill ${s.name}\``);
+  }
   return lines.join("\n");
 }
 
@@ -309,22 +564,28 @@ async function runAccess(ctx: CommandContext): Promise<string> {
   store.close();
 
   const lines: string[] = [];
-  lines.push(`owner - ${owner ? `@${owner}` : "(unset)"}`);
+  lines.push(`owner - ${owner ? `${owner}` : "(unset)"}`);
   if (grants.length === 0) {
     lines.push("No grants. Only the owner can use the bot.");
   } else {
+    const byUser = new Map<string, string[]>();
     for (const grant of grants) {
-      const where =
+      const scope =
         grant.roomId === "*"
           ? "everywhere"
           : grant.roomId === DM_SCOPE
-            ? "direct messages"
+            ? "dm"
             : `#${grant.roomName ?? grant.roomId}`;
-      lines.push(`- @${grant.username} - ${where}`);
+      const list = byUser.get(grant.username) ?? [];
+      list.push(scope);
+      byUser.set(grant.username, list);
+    }
+    for (const [username, scopes] of byUser) {
+      lines.push(`- ${username} - ${scopes.join(", ")}`);
     }
   }
 
-  return [`**Access for @${mention}**`, ...lines].join("\n");
+  return [`**Access for ${mention}**`, ...lines].join("\n");
 }
 
 function adminAuth(ctx: CommandContext): RCLoginResult {
@@ -341,6 +602,68 @@ async function adminAuthForServer(serverUrl: string, ctx: CommandContext): Promi
   const admin = await loadAdmin(serverUrl);
   if (admin) return { userId: admin.userId, authToken: admin.authToken };
   return adminAuth(ctx);
+}
+
+/**
+ * Resolve a group/channel by name on the Rocket.Chat server. Private rooms
+ * (`groups.info`) are deliberately hidden from callers that are not members and
+ * lack `view-room-administration`, so an insufficient credential produces a false
+ * "not found" even though the room exists. Tries the admin credential, then the
+ * bot's own token (it is a member of its rooms), then the bot's own
+ * subscriptions — which list private rooms it belongs to. Reasons are appended
+ * to `reasons` when a lookup fails, so callers can tell "missing" from "denied".
+ */
+async function resolveGroupByName(
+  ctx: CommandContext,
+  auth: RCLoginResult,
+  groupName: string,
+  reasons?: string[],
+): Promise<RocketChatGroup | null> {
+  let group = await getGroupByName(ctx.account.serverUrl, auth, groupName, reasons);
+  if (group) return group;
+  const botAuth = adminAuth(ctx);
+  if (botAuth.userId !== auth.userId) {
+    group = await getGroupByName(ctx.account.serverUrl, botAuth, groupName, reasons);
+  }
+  if (group) return group;
+  return resolveGroupFromSubscriptions(ctx, groupName, reasons);
+}
+
+/** Find a subscribed room (private or public) by name via the bot's own subscriptions. */
+async function resolveGroupFromSubscriptions(
+  ctx: CommandContext,
+  groupName: string,
+  reasons?: string[],
+): Promise<RocketChatGroup | null> {
+  const normalized = normalizeRoomName(groupName);
+  try {
+    const subs = await ctx.client.listSubscriptions(null);
+    const match = subs.find(
+      (s) =>
+        s.rid &&
+        !s.prid &&
+        (s.t === "p" || s.t === "c") &&
+        s.name !== undefined &&
+        normalizeRoomName(s.name) === normalized,
+    );
+    if (match) {
+      return { _id: match.rid, name: match.name ?? groupName, isPrivate: match.t === "p" };
+    }
+    const disc = subs.find(
+      (s) =>
+        s.rid &&
+        s.prid &&
+        (normalizeRoomName(s.name ?? "") === normalized ||
+          normalizeRoomName(s.fname ?? "") === normalized),
+    );
+    if (disc) {
+      reasons?.push("/api/v1/subscriptions.get: discussion");
+      return null;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 /** Parse `key value --flag value` style args into a positional list + flags map. */
@@ -377,7 +700,7 @@ async function runStatus(ctx: CommandContext): Promise<string> {
   return [
     "**Status**",
     `- gateway - ${gateway}`,
-    `- bot - @${mention}`,
+    `- bot - ${mention}`,
     `- agent - ${agent}`,
     `- runtime - ${runtime}`,
   ].join("\n");
@@ -388,16 +711,8 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
   const username = positional[0];
   if (!username) {
     return [
-      "**Create a new bot user**",
-      'Usage: `!add-bot <username> [--name "..."] [--email ...] [--agent <id>]`',
-      "",
-      "Examples:",
-      "  `!add-bot alice` - quick create; auto-creates a dedicated agent `rc-alice`",
-      '  `!add-bot alice --name "Alice Smith" --email alice@example.com --agent support`',
-      "",
-      "By default each bot gets its own dedicated agent (`rc-<username>`), so memory is isolated. " +
-        "Pass `--agent <id>` to bind the bot to an existing shared agent instead (e.g. `main`, `work`).",
-      "",
+      'Usage: !add-bot <username> [--name "..."] [--email ...] [--agent <id>]',
+      "Creates a bot with its own agent (rc-<username>); --agent binds a shared one.",
       "A random password is generated and shown once. The bot comes online automatically.",
     ].join("\n");
   }
@@ -414,30 +729,37 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
     const result = ensureAgentForBot(username);
     agent = result.agentId;
     if (result.fallback) {
-      return [
-        `Created bot @${username}, but could not auto-create a dedicated agent.`,
-        `Falling back to 'main' - memory is isolated per-bot via session keys, but the bot shares the main agent workspace.`,
-      ].join("\n");
-    }
-    if (result.created) {
+      agentNote = ` (agent auto-creation failed: ${result.reason ?? "unknown error"} - bound to 'main'; memory is still isolated per-bot via session keys)`;
+    } else if (result.created) {
       agentNote = ` (auto-created dedicated agent '${agent}')`;
     }
   }
 
   try {
+    const limitCheck = checkBotCreationLimit("inline", {
+      serverUrl: ctx.account.serverUrl,
+      maxAccounts: ctx.limits?.maxAccounts,
+      maxBotsPerServer: ctx.limits?.maxBotsPerServer,
+      cooldownMs: ctx.limits?.botCreationCooldownMs,
+    });
+    if (!limitCheck.allowed) {
+      return limitCheck.reason ?? "Bot creation limit reached.";
+    }
+
     const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
 
     const existingServer = await getUserInfo(ctx.account.serverUrl, auth, { username });
     const existingConfig = readAccount(username.toLowerCase());
     if (existingServer) {
-      return `Bot @${username} already exists on the Rocket.Chat server. Use \`!remove-bot ${username}\` first if you want to recreate it.`;
+      return `Bot ${username} already exists on the Rocket.Chat server. Use \`!remove-bot ${username}\` first if you want to recreate it.`;
     }
     if (existingConfig) {
-      return `Bot @${username} already exists in OpenClaw config. Use \`!remove-bot ${username}\` first if you want to recreate it.`;
+      return `Bot ${username} already exists in OpenClaw config. Use \`!remove-bot ${username}\` first if you want to recreate it.`;
     }
 
     await createBotUser(ctx.account.serverUrl, auth, { username, name, password, email });
     const botAuth = await loginAs(ctx.account.serverUrl, username, password);
+    recordBotCreation(username, "inline");
     const accountId = username;
 
     addAccount({
@@ -459,12 +781,12 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
           ctx.account.serverUrl,
           botAuth,
           dmRoom,
-          `Hi! I'm @${username}, your new Rocket.Chat bot connected to OpenClaw (agent \`${agent}\`). ` +
+          `Hi! I'm ${username}, your new Rocket.Chat bot connected to OpenClaw (agent \`${agent}\`). ` +
             `Once you see status online, confirm with \`!status\` or \`!help\` to know more.`,
         );
-        dmNote = `Welcome DM sent to @${owner}.`;
+        dmNote = `Welcome DM sent to ${owner}.`;
       } catch (e: unknown) {
-        dmNote = `Could not DM @${owner}: ${e instanceof Error ? e.message : String(e)}`;
+        dmNote = `Could not DM ${owner}: ${e instanceof Error ? e.message : String(e)}`;
       }
     }
 
@@ -477,7 +799,7 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
     });
 
     return [
-      `**Created bot @${username}**`,
+      `**Created bot ${username}**`,
       `agent - ${agent}${agentNote}`,
       `password (shown once) - \`${password}\``,
       ...(dmNote ? [dmNote] : []),
@@ -522,6 +844,37 @@ function startBotAccount(
   );
 }
 
+/**
+ * Notify the affected user about a lend/revoke. The notice is always sent
+ * via DM to the user so that group chats only show the command reply, not a
+ * second personal notification. Returns an error note to append to the
+ * command reply if the notice could not be delivered.
+ */
+async function notifyAccessChange(
+  ctx: CommandContext,
+  cleanUser: string,
+  roomId: string,
+  scopeLabel: string,
+  action: "granted" | "revoked",
+  targetIsBot: boolean,
+): Promise<string | undefined> {
+  const botMention = ctx.account.mentionNames[0] ?? ctx.accountId;
+  const how =
+    roomId === DM_SCOPE ? "You can now DM the bot." : "You can now mention the bot there.";
+  const text =
+    action === "granted"
+      ? `You've been granted access to ${botMention} in ${scopeLabel}. ${how}`
+      : `Your access to ${botMention} in ${scopeLabel} has been revoked.`;
+  try {
+    const botAuth = adminAuth(ctx);
+    const dmRoomId = await createDirectMessage(ctx.account.serverUrl, botAuth, cleanUser);
+    await ctx.client.postMessage(dmRoomId, text);
+    return undefined;
+  } catch (e: unknown) {
+    return ` (notice to ${cleanUser} failed: ${e instanceof Error ? e.message : String(e)})`;
+  }
+}
+
 async function runLend(ctx: CommandContext, argStr: string): Promise<string> {
   const { positional, flags } = parseArgs(argStr);
   const wantDm = flags.dm === "true";
@@ -548,14 +901,15 @@ async function runLend(ctx: CommandContext, argStr: string): Promise<string> {
 
   try {
     const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
-    const userExists = await getUserInfo(ctx.account.serverUrl, auth, { username: cleanUser });
-    if (!userExists) return `User @${cleanUser} not found on the Rocket.Chat server.`;
+    const targetUser = await getUserInfo(ctx.account.serverUrl, auth, { username: cleanUser });
+    if (!targetUser) return `User ${cleanUser} not found on the Rocket.Chat server.`;
 
     let roomId: string;
     let roomName: string;
     if (groupName) {
-      const group = await getGroupByName(ctx.account.serverUrl, auth, groupName);
-      if (!group) return `Group "${groupName}" not found.`;
+      const reasons: string[] = [];
+      const group = await resolveGroupByName(ctx, auth, groupName, reasons);
+      if (!group) return groupNotFoundText(groupName, reasons);
       roomId = group._id;
       roomName = group.name;
     } else {
@@ -577,9 +931,18 @@ async function runLend(ctx: CommandContext, argStr: string): Promise<string> {
     store.close();
 
     const scope = roomId === DM_SCOPE ? "direct messages" : `#${roomName}`;
-    return ok
-      ? `Granted @${cleanUser} access to @${ctx.account.mentionNames[0] ?? ctx.accountId} in ${scope}.`
-      : `That grant already exists.`;
+    if (ok) {
+      const notice = await notifyAccessChange(
+        ctx,
+        cleanUser,
+        roomId,
+        scope,
+        "granted",
+        !!targetUser.roles?.includes("bot"),
+      );
+      return `Granted ${cleanUser} access to ${ctx.account.mentionNames[0] ?? ctx.accountId} in ${scope}.${notice ?? ""}`;
+    }
+    return `That grant already exists.`;
   } catch (e: unknown) {
     return `Failed to lend: ${e instanceof Error ? e.message : String(e)}`;
   }
@@ -611,16 +974,34 @@ async function runRevoke(ctx: CommandContext, argStr: string): Promise<string> {
 
   try {
     const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
-    const userExists = await getUserInfo(ctx.account.serverUrl, auth, { username: cleanUser });
-    if (!userExists) return `User @${cleanUser} not found on the Rocket.Chat server.`;
+    const targetUser = await getUserInfo(ctx.account.serverUrl, auth, { username: cleanUser });
+    if (!targetUser) return `User ${cleanUser} not found on the Rocket.Chat server.`;
 
     let roomId: string;
     let roomName: string;
     if (groupName) {
-      const group = await getGroupByName(ctx.account.serverUrl, auth, groupName);
-      if (!group) return `Group "${groupName}" not found.`;
-      roomId = group._id;
-      roomName = group.name;
+      const reasons: string[] = [];
+      const group = await resolveGroupByName(ctx, auth, groupName, reasons);
+      if (group) {
+        roomId = group._id;
+        roomName = group.name;
+      } else {
+        // The group can't be resolved via the API (private room with insufficient
+        // credentials, archived, renamed, or deleted). Fall back to the persisted
+        // grant, which carries the same roomName that `!access` displays.
+        const store = new AccessStore();
+        const grants = store.loadGrants(ctx.accountId);
+        store.close();
+        const match = grants.find(
+          (g) =>
+            g.username.toLowerCase() === cleanUser.toLowerCase() &&
+            g.roomName !== undefined &&
+            normalizeRoomName(g.roomName) === normalizeRoomName(groupName),
+        );
+        if (!match) return groupNotFoundText(groupName, reasons);
+        roomId = match.roomId;
+        roomName = match.roomName ?? groupName;
+      }
     } else {
       roomId = DM_SCOPE;
       roomName = "direct";
@@ -636,9 +1017,18 @@ async function runRevoke(ctx: CommandContext, argStr: string): Promise<string> {
     store.close();
 
     const scope = roomId === DM_SCOPE ? "direct messages" : `#${roomName}`;
-    return ok
-      ? `Revoked @${cleanUser}'s access to @${ctx.account.mentionNames[0] ?? ctx.accountId} in ${scope}.`
-      : `No such grant found. @${cleanUser} did not have access in ${scope}.`;
+    if (ok) {
+      const notice = await notifyAccessChange(
+        ctx,
+        cleanUser,
+        roomId,
+        scope,
+        "revoked",
+        !!targetUser.roles?.includes("bot"),
+      );
+      return `Revoked ${cleanUser}'s access to ${ctx.account.mentionNames[0] ?? ctx.accountId} in ${scope}.${notice ?? ""}`;
+    }
+    return `No such grant found. ${cleanUser} did not have access in ${scope}.`;
   } catch (e: unknown) {
     return `Failed to revoke: ${e instanceof Error ? e.message : String(e)}`;
   }
@@ -664,16 +1054,14 @@ function assertCanDelegate(ctx: CommandContext, roomId: string): string | undefi
     return g.roomId === "*" || g.roomId === roomId;
   });
 
-  return allowed
-    ? undefined
-    : "You can only grant access in spaces where you already have access.";
+  return allowed ? undefined : "You can only grant access in spaces where you already have access.";
 }
 
 async function runRemoveBot(ctx: CommandContext, argStr: string): Promise<string> {
   const { positional } = parseArgs(argStr);
   const usernames = positional.map((p) => p.trim().replace(/^@+/, "")).filter(Boolean);
   if (usernames.length === 0)
-    return "Usage: `!remove-bot <username...>` - delete one or more bot accounts (server user + OpenClaw config)";
+    return "Usage: `!remove-bot <username...>` - delete one or more bot accounts (server user + OpenClaw config). Clears config, creds & agent; gateway auto-restarts. Optional: run `openclaw sessions cleanup` to also purge old shared-agent sessions.";
 
   try {
     const auth = await adminAuthForServer(ctx.account.serverUrl, ctx);
@@ -702,7 +1090,7 @@ async function removeSingleBot(
   if (!configured && !onServer) {
     return {
       removed: false,
-      text: `- @${username}: not found on server or in OpenClaw config. Skipped.`,
+      text: `- ${username}: not found on server or in OpenClaw config. Skipped.`,
     };
   }
 
@@ -720,20 +1108,48 @@ async function removeSingleBot(
   const boundAgent = existingBindings[0]?.agentId;
   const ownsDedicatedAgent = boundAgent === `rc-${username}`;
 
-  removeBindingsForAccount(username);
-  removeAccount(username);
-  if (ownsDedicatedAgent) {
-    removeAgentDir(username);
+  const steps: string[] = [];
+
+  try {
+    removeBindingsForAccount(username);
+    steps.push("OpenClaw binding removed");
+  } catch (e: unknown) {
+    steps.push(`binding cleanup failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  const lines = [
-    `- @${username}: ${serverNote}`,
-    `  OpenClaw config account + agent binding removed.`,
-    ownsDedicatedAgent
-      ? `  Agent workspace \`rc-${username}\` removed.`
-      : `  Kept shared agent \`${boundAgent}\` (bot was not its owner).`,
-  ];
-  return { removed: true, text: lines.join("\n") };
+  try {
+    removeAccount(username);
+    steps.push("OpenClaw account removed");
+  } catch (e: unknown) {
+    steps.push(`account cleanup failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  let credNote = "kept no credentials (none stored)";
+  try {
+    if (await removeBotCredentials(username)) {
+      credNote = "local credentials deleted";
+    } else {
+      credNote = "no local credential file found";
+    }
+  } catch (e: unknown) {
+    credNote = `credential cleanup failed: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  steps.push(credNote);
+
+  if (ownsDedicatedAgent) {
+    try {
+      removeAgentDir(username);
+      steps.push(`workspace \`rc-${username}\` removed`);
+    } catch (e: unknown) {
+      steps.push(`workspace cleanup failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  } else {
+    steps.push(`kept shared agent \`${boundAgent}\``);
+  }
+
+  const trims = [serverNote, ...steps].join(", ");
+
+  return { removed: true, text: `- ${username}: ${trims}.` };
 }
 
 async function runAddGroup(ctx: CommandContext, argStr: string): Promise<string> {
@@ -749,31 +1165,36 @@ async function runAddGroup(ctx: CommandContext, argStr: string): Promise<string>
 
     const botExists = await getUserInfo(ctx.account.serverUrl, auth, { username: botName });
     if (!botExists) {
-      return `Bot @${botName} not found on the Rocket.Chat server. Use \`!add-bot ${botName}\` to create it first.`;
+      return `Bot ${botName} not found on the Rocket.Chat server. Use \`!add-bot ${botName}\` to create it first.`;
     }
     const botConfigured = readAccount(botName.toLowerCase());
     if (!botConfigured) {
-      return `@${botName} exists on the server but is not configured in OpenClaw. Use \`!add-bot ${botName}\` to set it up.`;
+      return `${botName} exists on the server but is not configured in OpenClaw. Use \`!add-bot ${botName}\` to set it up.`;
     }
 
-    const group = await getGroupByName(ctx.account.serverUrl, auth, groupName);
-    if (!group) return `Group/channel "#${groupName}" not found.`;
+    const reasons: string[] = [];
+    const group = await resolveGroupByName(ctx, auth, groupName, reasons);
+    if (!group) return groupNotFoundText(`#${groupName}`, reasons);
 
     const isPrivate = group.isPrivate;
 
     const members = await listGroupMembers(ctx.account.serverUrl, auth, group._id);
     const alreadyIn = members.some((m) => m.username.toLowerCase() === botName.toLowerCase());
     if (alreadyIn) {
-      return `@${botName} is already a member of #${group.name}. No action needed.`;
+      return `${botName} is already a member of #${group.name}. No action needed.`;
     }
 
     try {
       await inviteToGroup(ctx.account.serverUrl, auth, group._id, botName, isPrivate);
     } catch (e: unknown) {
-      return `Failed to add @${botName} to #${group.name}: ${e instanceof Error ? e.message : String(e)}`;
+      const err = e instanceof Error ? e.message : String(e);
+      const denied = /not.authorized|not-authorized|forbidden|permission/i.test(err);
+      return denied
+        ? `Can't add ${botName} to #${group.name}: the ${isPrivate ? "admin" : "acting"} account lacks invite permission for this ${isPrivate ? "private group" : "channel"}. Ensure that account is a member or has the right to invite (${err}).`
+        : `Failed to add ${botName} to #${group.name}: ${err}`;
     }
 
-    return `Invited @${botName} to #${group.name}${isPrivate ? " (private group)" : " (channel)"}. The bot will start receiving messages there.`;
+    return `Invited ${botName} to #${group.name}${isPrivate ? " (private group)" : " (channel)"}. The bot will start receiving messages there.`;
   } catch (e: unknown) {
     return `Failed to add bot to group: ${e instanceof Error ? e.message : String(e)}`;
   }

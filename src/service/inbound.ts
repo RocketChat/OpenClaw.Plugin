@@ -81,6 +81,7 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     Surface: "rocketchat",
     MessageSid: params.event.messageId,
     MessageSidFull: params.event.messageId,
+    ...(params.event.tmid ? { ThreadRootSid: params.event.tmid } : {}),
     Timestamp: timestamp,
     OriginatingChannel: "rocketchat",
     OriginatingTo: to,

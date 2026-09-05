@@ -1,5 +1,6 @@
 import * as p from "@clack/prompts";
 import color from "picocolors";
+import { Prompt, isCancel, type PromptOptions } from "@clack/core";
 import { isPrivateOrLoopbackHost } from "openclaw/plugin-sdk/ssrf-runtime";
 
 export function normalizeRocketChatUrl(input: string): string | null {
@@ -42,10 +43,113 @@ export async function promptText(opts: Parameters<typeof p.text>[0]): Promise<st
   return value as string;
 }
 
-export async function promptPassword(opts: Parameters<typeof p.password>[0]): Promise<string> {
-  const value = await p.password(opts);
-  handleCancel(value);
-  return value as string;
+const MASK_CHAR = "•";
+const S_BAR = "│";
+const S_BAR_END = "└";
+
+function stepSymbol(state: string): string {
+  switch (state) {
+    case "submit":
+      return color.green("◇");
+    case "cancel":
+      return color.red("■");
+    case "error":
+      return color.yellow("▲");
+    default:
+      return color.cyan("◆");
+  }
+}
+
+type ValidateFn = (value: string | undefined) => string | Error | undefined;
+
+class TogglePasswordPrompt extends Prompt<string> {
+  _value = "";
+  _visible = false;
+  _mask: string;
+  _message: string;
+
+  get displayValue(): string {
+    return this._visible ? this._value : this._value.replaceAll(/./g, this._mask);
+  }
+
+  constructor(message: string, validate?: ValidateFn) {
+    const opts: PromptOptions<string, TogglePasswordPrompt> = {
+      render() {
+        const display = this.displayValue;
+        const cursor =
+          this.state === "submit" || this.state === "cancel"
+            ? ""
+            : color.inverse(color.hidden("_"));
+        switch (this.state) {
+          case "error":
+            return `${stepSymbol(this.state)}  ${this._message}\n${color.yellow(S_BAR)}  ${display}${cursor}\n${color.yellow(S_BAR_END)}  ${color.yellow(this.error)}`;
+          case "submit":
+            return `${stepSymbol(this.state)}  ${this._message}\n${color.gray(S_BAR)}  ${color.dim(display)}`;
+          case "cancel":
+            return `${stepSymbol(this.state)}  ${this._message}\n${color.gray(S_BAR)}  ${color.strikethrough(color.dim(display || "—"))}`;
+          default:
+            return `${stepSymbol(this.state)}  ${this._message} ${color.dim(`(Tab: ${this._visible ? "mask" : "show"})`)}\n${color.cyan(S_BAR)}  ${display}${cursor}\n${color.cyan(S_BAR_END)} `;
+        }
+      },
+      validate: validate as PromptOptions<string, Prompt<string>>["validate"],
+    };
+    super(opts as unknown as PromptOptions<string, Prompt<string>>, false);
+
+    this._message = message;
+    this._mask = MASK_CHAR;
+
+    this.on(
+      "key",
+      (
+        str: string | undefined,
+        key: { ctrl?: boolean | undefined; meta?: boolean | undefined; name?: string | undefined },
+      ) => {
+        if (key?.name === "tab" || str === "\t") {
+          this._visible = !this._visible;
+          return;
+        }
+        if (key?.name === "backspace") {
+          this._value = this._value.slice(0, -1);
+          this.value = this._value;
+          return;
+        }
+        if (str && !key?.ctrl && !key?.meta && str.length === 1 && key?.name !== "return") {
+          this._value += str;
+          this.value = this._value;
+        }
+      },
+    );
+  }
+}
+
+export async function promptPassword(opts: {
+  message: string;
+  validate?: ValidateFn | Parameters<typeof p.text>[0]["validate"];
+}): Promise<string> {
+  const prompt = new TogglePasswordPrompt(opts.message, opts.validate as ValidateFn | undefined);
+  const result = await prompt.prompt();
+  if (isCancel(result)) {
+    p.cancel("Setup cancelled.");
+    process.exit(0);
+  }
+  return result as string;
+}
+
+export async function promptPasswordConfirm(opts: Parameters<typeof p.text>[0]): Promise<string> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const password = await promptPassword({
+      ...opts,
+      message: attempt === 0 ? opts.message : `${opts.message} (try again)`,
+    });
+    const confirm = await promptPassword({
+      message: "Confirm password",
+      validate: (value) => (value ? undefined : "Password is required"),
+    });
+    if (password === confirm) return password;
+    p.log.warn("Passwords do not match. Please try again.");
+  }
+  p.log.error("Too many mismatched attempts.");
+  process.exit(1);
 }
 
 export async function promptTwoFactorCode(opts: {
@@ -55,13 +159,13 @@ export async function promptTwoFactorCode(opts: {
 }): Promise<string> {
   const isEmail = (opts.method ?? "totp") === "email";
   const methodHint = opts.method && opts.method !== "totp" ? ` (${opts.method})` : "";
-  const value = await p.text({
-    message:
-      opts.message ??
-      (isEmail
-        ? "Email verification code (check your inbox)"
-        : `Two-factor authentication code${methodHint}`),
-    placeholder: isEmail ? "from email" : "123456",
+  const message =
+    opts.message ??
+    (isEmail
+      ? "Email verification code (check your inbox)"
+      : `Two-factor authentication code${methodHint}`);
+  const value = await promptPassword({
+    message,
     validate: (v) => {
       const trimmed = (v ?? "").trim();
       if (!trimmed) return opts.allowEmpty ? undefined : "Code is required";
@@ -69,8 +173,7 @@ export async function promptTwoFactorCode(opts: {
       return undefined;
     },
   });
-  handleCancel(value);
-  return (value as string).replace(/\s+/g, "");
+  return value.replace(/\s+/g, "");
 }
 
 export async function promptConfirm(opts: Parameters<typeof p.confirm>[0]): Promise<boolean> {
@@ -123,13 +226,17 @@ export function printNextSteps(steps: string[]): void {
   p.note(steps.map((s, i) => `${color.dim(`${i + 1}.`)} ${s}`).join("\n"), "Next steps");
 }
 
-export async function showServerStatus(url: string, check: () => Promise<boolean>): Promise<void> {
+export async function showServerStatus(
+  url: string,
+  check: () => Promise<boolean>,
+): Promise<boolean> {
   const online = await check();
   if (online) {
     p.log.success(`Rocket.Chat server: ${color.green("online")} (${color.dim(url)})`);
   } else {
     p.log.error(`Rocket.Chat server: ${color.red("offline")} (${color.dim(url)})`);
   }
+  return online;
 }
 
 export { p as prompts, color };
