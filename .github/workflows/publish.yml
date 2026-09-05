@@ -37,12 +37,12 @@ jobs:
       - name: Authenticate with ClawHub
         env:
           CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
-        run: clawhub login --token "$CLAWHUB_TOKEN"
+        run: pnpm dlx clawhub login --token "$CLAWHUB_TOKEN"
 
       # Publish to ClawHub
       - name: Publish to ClawHub
         run: |
-          clawhub package publish . \
+          pnpm dlx clawhub package publish . \
             --owner @dodaa08 \
             --source-repo RocketChat/OpenClaw.Plugin \
             --source-commit ${{ github.sha }} \
