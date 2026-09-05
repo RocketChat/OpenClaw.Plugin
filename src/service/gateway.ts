@@ -359,8 +359,7 @@ function reformatModel(text: string): string {
   const out: string[] = [];
   let current = "";
   const models: string[] = [];
-  const SENSITIVE =
-    /api[_-]?key|secret|password|oauth|token|credential|bearer|authorization/i;
+  const SENSITIVE = /api[_-]?key|secret|password|oauth|token|credential|bearer|authorization/i;
   for (const raw of lines) {
     const line = raw.trim();
     if (!line) continue;
@@ -388,7 +387,10 @@ function reformatCommandReply(command: string | null, text: string): string {
   let out = text.replace(OPENCLAW_CMD_RE, "!$1");
   // Tidy the model card: keep the current model + a clean available list.
   if (command.startsWith("/model")) {
-    const modelArg = command.replace(/^\/model\s*/i, "").trim().toLowerCase();
+    const modelArg = command
+      .replace(/^\/model\s*/i, "")
+      .trim()
+      .toLowerCase();
     const wantsList = modelArg === "" || modelArg === "status" || modelArg === "list";
     if (wantsList) {
       try {
@@ -415,7 +417,10 @@ const EMOJI_RE =
   /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{1F1E6}-\u{1F1FF}\u{FE00}-\u{FE0F}\u{2190}-\u{21FF}\u{2300}-\u{23FF}\u{2460}-\u{24FF}\u{25A0}-\u{25FF}\u{2900}-\u{297F}\u{2022}\u{00B7}]/gu;
 
 function stripEmojis(text: string): string {
-  return text.replace(EMOJI_RE, "").replace(/[ \t]{2,}/g, " ").trim();
+  return text
+    .replace(EMOJI_RE, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
 }
 
 const SEND_RETRY_DELAY_MS = 500;
@@ -488,7 +493,9 @@ async function sendReply(
   const sendMsg = (roomId: string, text: string, options?: { tmid?: string }) =>
     postMessageWithRetry(client, accountId, roomId, text, options?.tmid);
   const tmidOpt = replyTmid ? { tmid: replyTmid } : undefined;
-  logger.info(`[rocketchat:${accountId}] reply tmid=${replyTmid ?? "none"} text="${text.slice(0, 60)}"`);
+  logger.info(
+    `[rocketchat:${accountId}] reply tmid=${replyTmid ?? "none"} text="${text.slice(0, 60)}"`,
+  );
 
   try {
     if (payload.attachmentPath) {
@@ -944,7 +951,6 @@ function mapRoomType(t: string | undefined): InboundEvent["roomType"] {
   if (t === "p") return "group";
   return "channel";
 }
-
 
 function dedupeMentions(mentions: string[]): string[] {
   return [...new Set(mentions.map((mention) => mention.trim()).filter(Boolean))];

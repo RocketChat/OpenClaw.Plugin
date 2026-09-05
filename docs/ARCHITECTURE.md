@@ -101,41 +101,42 @@ Plugin DDP Client
 
 ### Inbound (Rocket.Chat → Agent)
 
-| Step | What Happens |
-|------|--------------|
-| **Stream** | DDP WebSocket receives `room-messages` events |
-| **Dedup** | Check SQLite checkpoint (`~/.openclaw/rocketchat/<id>.db`) — skip if seen |
-| **Filter** | Ignore own messages, system events, empty messages |
-| **Parse** | Extract roomId, userId, text, attachments, quote chains (4 levels) |
-| **Mention** | DMs: always process. Groups: only on `@mention` or `!command` |
-| **Permissions** | Owner always allowed; others checked against access grants |
-| **Route** | `!help` / `!status` handled locally; others → agent |
+| Step            | What Happens                                                              |
+| --------------- | ------------------------------------------------------------------------- |
+| **Stream**      | DDP WebSocket receives `room-messages` events                             |
+| **Dedup**       | Check SQLite checkpoint (`~/.openclaw/rocketchat/<id>.db`) — skip if seen |
+| **Filter**      | Ignore own messages, system events, empty messages                        |
+| **Parse**       | Extract roomId, userId, text, attachments, quote chains (4 levels)        |
+| **Mention**     | DMs: always process. Groups: only on `@mention` or `!command`             |
+| **Permissions** | Owner always allowed; others checked against access grants                |
+| **Route**       | `!help` / `!status` handled locally; others → agent                       |
 
 ### Outbound (Agent → Rocket.Chat)
 
-| Step | What Happens |
-|------|--------------|
-| **Receive** | Agent sends final reply payload |
-| **Reformat** | Strip OpenClaw `/` commands, replace with `!` equivalents |
-| **Strip emoji** | Remove rendering emoji from output |
-| **Chunk** | Split at 4000 chars on newline/space boundaries |
+| Step              | What Happens                                              |
+| ----------------- | --------------------------------------------------------- |
+| **Receive**       | Agent sends final reply payload                           |
+| **Reformat**      | Strip OpenClaw `/` commands, replace with `!` equivalents |
+| **Strip emoji**   | Remove rendering emoji from output                        |
+| **Chunk**         | Split at 4000 chars on newline/space boundaries           |
 | **Track threads** | LRU map stores `messageId → threadId` for reply threading |
-| **Post** | DDP: send typing stop signal; REST: post message |
-| **Attachments** | Download → upload via REST → attach reference |
+| **Post**          | DDP: send typing stop signal; REST: post message          |
+| **Attachments**   | Download → upload via REST → attach reference             |
 
 ## Commands
 
 Commands are parsed by `CommandParser.parse()` and route three ways:
 
-| Type | Behavior |
-|------|----------|
-| **Reply** | Bot responds directly (no agent) |
-| **Passthrough** | Forwarded to agent as normal message |
+| Type                 | Behavior                                 |
+| -------------------- | ---------------------------------------- |
+| **Reply**            | Bot responds directly (no agent)         |
+| **Passthrough**      | Forwarded to agent as normal message     |
 | **OpenClaw Command** | Translated to `/compact`, `/reset`, etc. |
 
 ### Quick Reference
 
 **Bot Management** (owner-only)
+
 - `!add-bot <user>` — Create bot, agent, config
 - `!remove-bot <users...>` — Delete bots
 - `!add-group <group> [bot]` — Invite bot to group
@@ -143,6 +144,7 @@ Commands are parsed by `CommandParser.parse()` and route three ways:
 - `!revoke <group> <user>` — Revoke access
 
 **Status & Info**
+
 - `!help` — Command menu
 - `!status` — Gateway + connection status
 - `!bots` — List all bots
@@ -150,6 +152,7 @@ Commands are parsed by `CommandParser.parse()` and route three ways:
 - `!model` / `!model set <name>` — Show/switch model
 
 **Context Control**
+
 - `!compact` — Compress history
 - `!reset` — Wipe all context
 - `!new [model]` — Fresh start
@@ -226,6 +229,7 @@ Rocket.Chat Server
 ```
 
 **Benefits:**
+
 - One bot's crash doesn't affect others
 - Different agents can handle different tasks
 - Access control per-bot
@@ -244,7 +248,7 @@ Check: seen before?
      │
      └─ NO: process + record in checkpoint
             (SQLite: ~/.openclaw/rocketchat/<id>.db)
-            
+
 Checkpoint persists across restarts
 ```
 
@@ -289,16 +293,16 @@ connecting ──► connected ──► ready (streams subscribed)
 
 ## Security
 
-| Aspect | Implementation |
-|--------|---|
-| **Credentials** | Stored in `~/.openclaw/credentials/`, never in config files |
-| **Tokens** | One personal access token per bot; rotatable via Rocket.Chat UI |
-| **Access Control** | Explicit grants via `!lend`; stored in SQLite (`access.db`) |
-| **Admin Access** | Only used during setup; immediately discarded after |
-| **Transport** | HTTPS/WebSocket (encrypted in transit) |
-| **SSRF Protection** | `isSafeExternalUrl()` blocks private/loopback on downloads |
-| **Rate Limiting** | Max 10 bots total, 5 per server, 1 min cooldown |
-| **Self-Loop Prevention** | Strips bot mention from outbound messages |
+| Aspect                   | Implementation                                                  |
+| ------------------------ | --------------------------------------------------------------- |
+| **Credentials**          | Stored in `~/.openclaw/credentials/`, never in config files     |
+| **Tokens**               | One personal access token per bot; rotatable via Rocket.Chat UI |
+| **Access Control**       | Explicit grants via `!lend`; stored in SQLite (`access.db`)     |
+| **Admin Access**         | Only used during setup; immediately discarded after             |
+| **Transport**            | HTTPS/WebSocket (encrypted in transit)                          |
+| **SSRF Protection**      | `isSafeExternalUrl()` blocks private/loopback on downloads      |
+| **Rate Limiting**        | Max 10 bots total, 5 per server, 1 min cooldown                 |
+| **Self-Loop Prevention** | Strips bot mention from outbound messages                       |
 
 ## Deployment Models
 

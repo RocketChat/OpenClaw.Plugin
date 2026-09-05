@@ -36,20 +36,14 @@
             "name": "Llama 3.2 11B Vision (NVIDIA NIM)",
             "contextWindow": 131072,
             "maxTokens": 32000,
-            "input": [
-              "text",
-              "image"
-            ]
+            "input": ["text", "image"]
           },
           {
             "id": "anthropic/nvidia_nim/meta/llama-3.2-90b-vision-instruct",
             "name": "Llama 3.2 90B Vision (NVIDIA NIM)",
             "contextWindow": 131072,
             "maxTokens": 32000,
-            "input": [
-              "text",
-              "image"
-            ]
+            "input": ["text", "image"]
           }
         ]
       },
@@ -64,29 +58,21 @@
             "name": "Llama 3.2 11B Vision (NVIDIA NIM)",
             "contextWindow": 131072,
             "maxTokens": 32000,
-            "input": [
-              "text",
-              "image"
-            ]
+            "input": ["text", "image"]
           },
           {
             "id": "nvidia_nim/meta/llama-3.2-90b-vision-instruct",
             "name": "Llama 3.2 90B Vision (NVIDIA NIM)",
             "contextWindow": 131072,
             "maxTokens": 32000,
-            "input": [
-              "text",
-              "image"
-            ]
+            "input": ["text", "image"]
           },
           {
             "id": "nvidia_nim/meta/llama-3.1-70b-instruct",
             "name": "Llama 3.1 70B Instruct (NVIDIA NIM)",
             "contextWindow": 131072,
             "maxTokens": 32000,
-            "input": [
-              "text"
-            ]
+            "input": ["text"]
           }
         ]
       },
@@ -175,20 +161,14 @@
             "contextWindow": 1048576,
             "maxTokens": 32000,
             "reasoning": true,
-            "input": [
-              "text",
-              "image"
-            ]
+            "input": ["text", "image"]
           },
           {
             "id": "meta-llama/llama-3.2-11b-vision-instruct:free",
             "name": "Llama 3.2 11B Vision (OpenRouter Free)",
             "contextWindow": 131072,
             "maxTokens": 32000,
-            "input": [
-              "text",
-              "image"
-            ]
+            "input": ["text", "image"]
           }
         ]
       },
@@ -203,9 +183,7 @@
             "contextWindow": 16000,
             "maxTokens": 32000,
             "reasoning": false,
-            "input": [
-              "text"
-            ],
+            "input": ["text"],
             "cost": {
               "input": 0,
               "output": 0,
@@ -223,9 +201,7 @@
             "contextWindow": 16000,
             "maxTokens": 32000,
             "reasoning": false,
-            "input": [
-              "text"
-            ],
+            "input": ["text"],
             "cost": {
               "input": 0,
               "output": 0,
@@ -243,9 +219,7 @@
             "contextWindow": 32000,
             "maxTokens": 32000,
             "reasoning": false,
-            "input": [
-              "text"
-            ],
+            "input": ["text"],
             "cost": {
               "input": 0,
               "output": 0,
@@ -351,9 +325,7 @@
     "nativeSkills": false,
     "restart": true,
     "ownerDisplay": "raw",
-    "ownerAllowFrom": [
-      "rocketchat:CHANNEL_ID"
-    ]
+    "ownerAllowFrom": ["rocketchat:CHANNEL_ID"]
   },
   "session": {
     "dmScope": "per-channel-peer",
@@ -371,9 +343,7 @@
     "enabled": true,
     "token": "YOUR_HOOK_TOKEN",
     "allowRequestSessionKey": false,
-    "allowedSessionKeyPrefixes": [
-      "hook:"
-    ],
+    "allowedSessionKeyPrefixes": ["hook:"],
     "internal": {
       "enabled": true,
       "entries": {
@@ -400,12 +370,7 @@
     }
   },
   "plugins": {
-    "allow": [
-      "memory-core",
-      "document-extract",
-      "anthropic",
-      "rocketchat"
-    ],
+    "allow": ["memory-core", "document-extract", "anthropic", "rocketchat"],
     "bundledDiscovery": "allowlist",
     "entries": {
       "document-extract": {
@@ -419,9 +384,7 @@
       }
     },
     "load": {
-      "paths": [
-        "/home/USERNAME/personal/GSOC_project/Openclaw"
-      ]
+      "paths": ["/home/USERNAME/personal/GSOC_project/Openclaw"]
     }
   },
   "skills": {

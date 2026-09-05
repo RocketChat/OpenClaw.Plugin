@@ -1,7 +1,4 @@
-import {
-  createBotUser,
-  getUserInfo,
-} from "./admin-api.js";
+import { createBotUser, getUserInfo } from "./admin-api.js";
 import { checkBotCreationLimit, recordBotCreation } from "./rate-limiter.js";
 import { readChannelLimits } from "./config-updater.js";
 import { saveBotCredentials, loadBotCredentials } from "./credentials.js";
@@ -43,9 +40,7 @@ export async function resolveBotAuth(
   );
 
   if (existingUser) {
-    p.log.success(
-      `Bot ${color.cyan(`@${botUsername}`)} already exists verifying its credentials`,
-    );
+    p.log.success(`Bot ${color.cyan(`@${botUsername}`)} already exists verifying its credentials`);
     return verifyExistingBot(rcUrl, botUsername);
   }
 

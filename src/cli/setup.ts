@@ -116,10 +116,9 @@ async function printLoggedInAccounts(): Promise<void> {
   }
 
   p.note(
-    [
-      `  ${color.dim("admin")} @${adminUser}`,
-      `  ${color.dim("server")} ${admin.serverUrl}`,
-    ].join("\n"),
+    [`  ${color.dim("admin")} @${adminUser}`, `  ${color.dim("server")} ${admin.serverUrl}`].join(
+      "\n",
+    ),
     "Currently logged in",
   );
 }
