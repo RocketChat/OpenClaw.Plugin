@@ -37,6 +37,7 @@ const accountSchema = z
     mentionNames: z.array(z.string().min(1)).default([]),
     agent: z.string().min(1).optional(),
     owner: z.string().min(1).optional(),
+    ownerOnlySkills: z.array(z.string().min(1)).optional(),
   })
   .strict();
 
