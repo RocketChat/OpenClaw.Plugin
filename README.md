@@ -70,3 +70,5 @@ You should see `gateway - online` and `runtime - ready`.
 | [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | How the plugin works (DDP + REST, multi-bot, security) |
 | [COMMANDS.md](./docs/COMMANDS.md)         | Complete command reference                             |
 | [CONTRIBUTING.md](CONTRIBUTING.md)        | Contributors guide                                     |
+
+test change
