@@ -14,7 +14,7 @@ Connect your Rocket.Chat server directly to OpenClaw agents—no bridge server n
 - OpenClaw installed and configured with an AI provider
 - A default agent already set up
 
-> **Having issues?** Check [`openclaw.example.json`](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/openclaw.examples.json) in the repo root for a complete annotated configuration reference. You can also manually edit `~/.openclaw/openclaw.json` if needed.
+> **Having issues?** Check [`openclaw.examples.json`](./openclaw.examples.json) in the repo root for a complete annotated configuration reference. You can also manually edit `~/.openclaw/openclaw.json` if needed.
 
 ## Quick Start
 
