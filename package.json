@@ -1,6 +1,6 @@
 {
   "name": "@dodaa08/openclaw-plugin-test",
-  "version": "1.2.5",
+  "version": "1.2.6",
   "description": "A fully unified plugin for integrating Rocket.Chat with OpenClaw. This plugin eliminates the need for an external bridging server, providing a direct, single-place architecture for inbounds, outbounds, session management, and CLI configuration.",
   "main": "dist/index.js",
   "peerDependencies": {
