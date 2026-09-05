@@ -65,6 +65,7 @@
     "typescript": "^6.0.3"
   },
   "dependencies": {
+    "@rocket.chat/ddp-client": "^1.1.1",
     "@clack/prompts": "^1.7.0",
     "commander": "^15.0.0",
     "json5": "^2.2.3",

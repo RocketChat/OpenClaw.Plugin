@@ -276,7 +276,10 @@ function buildHelpText(showAll: boolean): string {
         ["groups", "groups joined by bots"],
         ["access", "who can use"],
         ["add-bot <user>", "create a bot"],
-        ["remove-bot <user...>", "delete bot(s); clears config, creds, agent\ngateway auto-restarts; run `openclaw sessions cleanup` for old sessions"],
+        [
+          "remove-bot <user...>",
+          "delete bot(s); clears config, creds, agent\ngateway auto-restarts; run `openclaw sessions cleanup` for old sessions",
+        ],
         ["add-group <group> [bot]", "invite bot to group"],
         ["lend <group> <user>", "grant group access"],
         ["lend dm <user>", "grant DM access"],
@@ -347,7 +350,8 @@ function buildHelpText(showAll: boolean): string {
     }
   }
   if (!showAll) lines.push("", "owner-only commands hidden - run as owner to see");
-  const footer = "\n\n💡 These commands are for quick, small tasks. For better and more precise results, use direct inbound messages.";
+  const footer =
+    "\n\n💡 These commands are for quick, small tasks. For better and more precise results, use direct inbound messages.";
   return "```\n" + lines.join("\n") + "\n```" + footer;
 }
 

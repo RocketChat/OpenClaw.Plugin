@@ -11,6 +11,9 @@ importers:
       '@clack/prompts':
         specifier: ^1.7.0
         version: 1.7.0
+      '@rocket.chat/ddp-client':
+        specifier: ^1.1.1
+        version: 1.1.2(@rocket.chat/emitter@0.33.0)(@rocket.chat/icons@0.49.0)
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -27,9 +30,6 @@ importers:
       '@clack/core':
         specifier: 1.4.3
         version: 1.4.3
-      '@rocket.chat/ddp-client':
-        specifier: ^1.1.1
-        version: 1.1.1(@rocket.chat/emitter@0.33.0)(@rocket.chat/icons@0.48.0)
       '@types/node':
         specifier: ^25.9.1
         version: 25.9.5
@@ -389,35 +389,32 @@ packages:
   '@protobufjs/utf8@1.1.2':
     resolution: {integrity: sha512-b1UQwcEZ4yCnMCD8DAL1VlbvBJE9/IX4FTIp7BG1xYpf29SLazLSrqUkj4w7Y5y7cCVP6E5tcqqcI0xemPkHug==}
 
-  '@rocket.chat/api-client@0.2.56':
-    resolution: {integrity: sha512-ua6f3JRg/WZDfq9b1c0codJzg3XnbzcJxZgDfmhKLuK7vEl1HvzjjdCh1yN3ZqDoec7MZ2IdlF11KUgSRYyENQ==}
+  '@rocket.chat/api-client@0.2.57':
+    resolution: {integrity: sha512-EB/06c1aXcv+QBUdjX8iNbHhOLEFgZUQaW6flu46clW7TGKZjIcMjRFsM/jjZM6rxu0mfwQCMydyfMTF3wu7YQ==}
 
-  '@rocket.chat/core-typings@8.6.1':
-    resolution: {integrity: sha512-tlx7SQV9/DL34GUoIPBfeE4tnb0oDxRizqOuZU1e6IwOFjL2iBJPq/OC4XHUXP9SAlBhsZ5h9SO7IIcXbIKasA==}
+  '@rocket.chat/core-typings@8.8.0':
+    resolution: {integrity: sha512-WNpobvR2Ah3ibr6d4Qeb9/QUREhVUe5HRUqisUD3dEfbAUuBaGCREMIqw0BflmPOdYng5x5HBkRDrNaT19Pvjg==}
 
-  '@rocket.chat/ddp-client@1.1.1':
-    resolution: {integrity: sha512-skdO711S2nNn9e3WZM426KpA1pRWRxSAnDDN15To5KfZkq1g51wLmNpZzK+JdCRVVHr6nsU6pp7pbamZaNNcYA==}
+  '@rocket.chat/ddp-client@1.1.2':
+    resolution: {integrity: sha512-44hgCIuq8Y2cXSCRU8564NbGguKamc4DuneWYPYZdbVAsIsNI7X6rRNlm3VgO3eL3WYnF0r219x2MeGDjWq2iA==}
     peerDependencies:
-      '@rocket.chat/emitter': '*'
-
-  '@rocket.chat/emitter@0.32.0':
-    resolution: {integrity: sha512-QCXNGDm5xjJPePMeP9GknMAZne5xhNmLLD/ZVVqNgOyeWdfQKddwBUqtMiWDaFCRq1bC22kNf3WQLqt89CO6fg==}
+      '@rocket.chat/emitter': ~0.33.0
 
   '@rocket.chat/emitter@0.33.0':
     resolution: {integrity: sha512-IpbDrRZ9EwwbDgU6ZflQ/BGjfWPHn6yT63QoPQ3t35X22WuFCv1n/ie0zPXb4AHjcorK0o8GVXvTO8DH4s4lAg==}
 
-  '@rocket.chat/icons@0.48.0':
-    resolution: {integrity: sha512-GITp0KBN0Bdvp2mgjMdybOJ3A5FJBP3oULv4PVq/5gRKcjL9sQZyDby01Ezhvtjn2KXKKDeCqm6ecOYTpSbLLA==}
+  '@rocket.chat/icons@0.49.0':
+    resolution: {integrity: sha512-SakRw9TW8y1QyVlCrXRvdmasKaLN1ejsU/J3gMCNgR57fsueBefe9EQfAB0T0I0V/P63Acw8NnlTexDQtm1etQ==}
 
-  '@rocket.chat/media-signaling@1.1.0':
-    resolution: {integrity: sha512-nQxDZmK1agGY++6a4VWD+v5096jC8xabnA/Ku2fgmBlkUoP6jSIzPhK+OyTxFPboEzmlNETmhfIXa75JUV3+PA==}
+  '@rocket.chat/media-signaling@1.2.0':
+    resolution: {integrity: sha512-Atd8wLPONNgwdYKLrhOfX9kqYcb+79UeiNEEe1o628DclTspmJcN5cneVwCfl8EC6nlPLSPiI0wBmrLfQmGaNg==}
 
-  '@rocket.chat/message-parser@0.31.36':
-    resolution: {integrity: sha512-Z8kmWHKswEYH9dnr6iU61DJG2BAmCTkvhXhZ4dtFHe8/UThgr8cJcFSpSJi/y8Fh7LakzQIsgq+xMZ1OcwZU+g==}
-    engines: {node: 22.16.0}
+  '@rocket.chat/message-parser@0.32.0':
+    resolution: {integrity: sha512-dnjKivGR5BUXfjVAX5fsld9YbUI1SeIMjmieK1XUt36+IWrtJThTBGfb6SwALDnRBey9vFc+XrIAAo2zb1AAvw==}
+    engines: {node: 22.22.3}
 
-  '@rocket.chat/rest-typings@8.6.1':
-    resolution: {integrity: sha512-1Ohwiw5TX2/ppHd3KchdFfi9BdOi5njibFGeS2RmiFf6GSE2eJz0b2WFMG7XJjzfHrfBkCzH2lbOs1wLmZewgw==}
+  '@rocket.chat/rest-typings@8.8.0':
+    resolution: {integrity: sha512-fvWyd9ey/6pOVlDHYzzGftmQgkQZRBH481SPohrYZIjzVziwpoKjItn4ZUKH0DrTXDJs3uYq/nIpDXEiRC0oFA==}
 
   '@rocket.chat/ui-kit@1.1.0':
     resolution: {integrity: sha512-fSzR3SjXcANOBSYvohCqSy/L9YzglCkgPEUQ3DeZP0PGbAPgB/ukttUUyvEXzOGtCafgiupyF6HeoGKA+Z/gpw==}
@@ -1828,10 +1825,10 @@ snapshots:
 
   '@protobufjs/utf8@1.1.2': {}
 
-  '@rocket.chat/api-client@0.2.56(@rocket.chat/icons@0.48.0)':
+  '@rocket.chat/api-client@0.2.57(@rocket.chat/icons@0.49.0)':
     dependencies:
-      '@rocket.chat/core-typings': 8.6.1
-      '@rocket.chat/rest-typings': 8.6.1(@rocket.chat/icons@0.48.0)
+      '@rocket.chat/core-typings': 8.8.0
+      '@rocket.chat/rest-typings': 8.8.0(@rocket.chat/icons@0.49.0)
       filter-obj: 3.0.0
       query-string: 7.1.3
       split-on-first: 3.0.0
@@ -1839,52 +1836,50 @@ snapshots:
     transitivePeerDependencies:
       - '@rocket.chat/icons'
 
-  '@rocket.chat/core-typings@8.6.1':
+  '@rocket.chat/core-typings@8.8.0':
     dependencies:
-      '@rocket.chat/icons': 0.48.0
-      '@rocket.chat/message-parser': 0.31.36
-      '@rocket.chat/ui-kit': 1.1.0(@rocket.chat/icons@0.48.0)
+      '@rocket.chat/icons': 0.49.0
+      '@rocket.chat/message-parser': 0.32.0
+      '@rocket.chat/ui-kit': 1.1.0(@rocket.chat/icons@0.49.0)
       typia: link:patch:typia@npm%3A9.7.2#~/.yarn/patches/typia-npm-9.7.2-5c5d9c80b4.patch
       zod: 4.3.6
 
-  '@rocket.chat/ddp-client@1.1.1(@rocket.chat/emitter@0.33.0)(@rocket.chat/icons@0.48.0)':
+  '@rocket.chat/ddp-client@1.1.2(@rocket.chat/emitter@0.33.0)(@rocket.chat/icons@0.49.0)':
     dependencies:
-      '@rocket.chat/api-client': 0.2.56(@rocket.chat/icons@0.48.0)
-      '@rocket.chat/core-typings': 8.6.1
+      '@rocket.chat/api-client': 0.2.57(@rocket.chat/icons@0.49.0)
+      '@rocket.chat/core-typings': 8.8.0
       '@rocket.chat/emitter': 0.33.0
-      '@rocket.chat/media-signaling': 1.1.0
-      '@rocket.chat/rest-typings': 8.6.1(@rocket.chat/icons@0.48.0)
+      '@rocket.chat/media-signaling': 1.2.0
+      '@rocket.chat/rest-typings': 8.8.0(@rocket.chat/icons@0.49.0)
     transitivePeerDependencies:
       - '@rocket.chat/icons'
 
-  '@rocket.chat/emitter@0.32.0': {}
-
   '@rocket.chat/emitter@0.33.0': {}
 
-  '@rocket.chat/icons@0.48.0': {}
+  '@rocket.chat/icons@0.49.0': {}
 
-  '@rocket.chat/media-signaling@1.1.0':
+  '@rocket.chat/media-signaling@1.2.0':
     dependencies:
-      '@rocket.chat/emitter': 0.32.0
+      '@rocket.chat/emitter': 0.33.0
       ajv: 8.20.0
 
-  '@rocket.chat/message-parser@0.31.36':
+  '@rocket.chat/message-parser@0.32.0':
     dependencies:
       tldts: 6.1.86
 
-  '@rocket.chat/rest-typings@8.6.1(@rocket.chat/icons@0.48.0)':
+  '@rocket.chat/rest-typings@8.8.0(@rocket.chat/icons@0.49.0)':
     dependencies:
-      '@rocket.chat/core-typings': 8.6.1
-      '@rocket.chat/message-parser': 0.31.36
-      '@rocket.chat/ui-kit': 1.1.0(@rocket.chat/icons@0.48.0)
+      '@rocket.chat/core-typings': 8.8.0
+      '@rocket.chat/message-parser': 0.32.0
+      '@rocket.chat/ui-kit': 1.1.0(@rocket.chat/icons@0.49.0)
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
     transitivePeerDependencies:
       - '@rocket.chat/icons'
 
-  '@rocket.chat/ui-kit@1.1.0(@rocket.chat/icons@0.48.0)':
+  '@rocket.chat/ui-kit@1.1.0(@rocket.chat/icons@0.49.0)':
     dependencies:
-      '@rocket.chat/icons': 0.48.0
+      '@rocket.chat/icons': 0.49.0
       typia: link:patch:typia@npm%3A9.7.2#~/.yarn/patches/typia-npm-9.7.2-5c5d9c80b4.patch
 
   '@silvia-odwyer/photon-node@0.3.4': {}

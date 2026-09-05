@@ -1,4 +1,12 @@
-import { existsSync, readFileSync, writeFileSync, renameSync, readdirSync, rmSync, mkdirSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  readdirSync,
+  rmSync,
+  mkdirSync,
+} from "node:fs";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
@@ -134,7 +142,9 @@ export function setDefaultModel(modelId: string): void {
   if (!cfg.agents.defaults) cfg.agents.defaults = {};
   const current = cfg.agents.defaults.model;
   const existing =
-    typeof current === "object" && current && typeof (current as { fallbacks?: unknown }).fallbacks === "object"
+    typeof current === "object" &&
+    current &&
+    typeof (current as { fallbacks?: unknown }).fallbacks === "object"
       ? { fallbacks: (current as { fallbacks: unknown }).fallbacks }
       : {};
   cfg.agents.defaults.model = { primary: modelId, ...existing };

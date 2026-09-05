@@ -96,7 +96,6 @@ export class AccessStore {
   close(): void {
     this.db.close();
   }
-
 }
 
 function toGrant(row: Record<string, unknown>): AccessGrant {

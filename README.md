@@ -18,12 +18,15 @@ Connect your Rocket.Chat server directly to OpenClaw agents—no bridge server n
 
 ## Quick Start
 
+Checkout : [SETUP.md](./docs/SETUP.md) Full installation, credentials & email setup
+
 ```bash
 openclaw plugins install clawhub:@dodaa08/openclaw-plugin-test
 openclaw rocketchat setup
 ```
 
 The wizard will:
+
 1. Ask for your Rocket.Chat server URL and admin login
 2. Create a bot user on your server
 3. Create or bind an OpenClaw agent
@@ -37,22 +40,21 @@ You should see `gateway - online` and `runtime - ready`.
 
 ## Common Commands
 
-| Command | Description |
-|---------|-------------|
-| `!help` | Show all commands |
-| `!status` | Gateway + connection status |
-| `!bots` | List bots and agents |
-| `!add-bot <user>` | Create a new bot (owner) |
-| `!remove-bot <user...>` | Delete bot(s) (owner) |
-| `!lend <group> <user>` | Grant access |
-| `!revoke <group> <user>` | Revoke access |
-| `!model` / `!model set <name>` | Show or switch model |
-| `!compact` | Compress conversation history |
-| `!reset` | Wipe context |
-| `!new [model]` | Start fresh conversation |
-| `!think <level>` | Set thinking depth (`off` / `low` / `medium` / `high`) |
-| `!abort` | Stop current reply |
-
+| Command                        | Description                                            |
+| ------------------------------ | ------------------------------------------------------ |
+| `!help`                        | Show all commands                                      |
+| `!status`                      | Gateway + connection status                            |
+| `!bots`                        | List bots and agents                                   |
+| `!add-bot <user>`              | Create a new bot (owner)                               |
+| `!remove-bot <user...>`        | Delete bot(s) (owner)                                  |
+| `!lend <group> <user>`         | Grant access                                           |
+| `!revoke <group> <user>`       | Revoke access                                          |
+| `!model` / `!model set <name>` | Show or switch model                                   |
+| `!compact`                     | Compress conversation history                          |
+| `!reset`                       | Wipe context                                           |
+| `!new [model]`                 | Start fresh conversation                               |
+| `!think <level>`               | Set thinking depth (`off` / `low` / `medium` / `high`) |
+| `!abort`                       | Stop current reply                                     |
 
 ## Notes
 
@@ -60,13 +62,11 @@ You should see `gateway - online` and `runtime - ready`.
 - Each bot is isolated (own connection, own agent, own access grants)
 - Admin token is only used during setup and can be deleted afterward
 
-
 ## Documentation
 
-| Doc | Description |
-|-----|-------------|
-| [SETUP.md](./docs/SETUP.md) | Full installation, credentials & email setup |
+| Doc                                       | Description                                            |
+| ----------------------------------------- | ------------------------------------------------------ |
+| [SETUP.md](./docs/SETUP.md)               | Full installation, credentials & email setup           |
 | [ARCHITECTURE.md](./docs/ARCHITECTURE.md) | How the plugin works (DDP + REST, multi-bot, security) |
-| [COMMANDS.md](./docs/COMMANDS.md) | Complete command reference |
-| [CONTRIBUTING.md](CONTRIBUTING.md) | Contributors guide |
-
+| [COMMANDS.md](./docs/COMMANDS.md)         | Complete command reference                             |
+| [CONTRIBUTING.md](CONTRIBUTING.md)        | Contributors guide                                     |

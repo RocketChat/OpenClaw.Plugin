@@ -31,9 +31,7 @@ export const EMAIL_USAGE = [
 ].join("\n");
 
 export const CONFIGURE_HEADING = "**Configure**";
-export const CONFIGURE_USAGE = ["• `!configure` check skill setup and get setup steps"].join(
-  "\n",
-);
+export const CONFIGURE_USAGE = ["• `!configure` check skill setup and get setup steps"].join("\n");
 
 type AuthStatus = { ok: boolean; hint: string };
 
@@ -674,7 +672,8 @@ export async function runEmailCommand(ctx: CommandContext, argStr: string): Prom
     const afterFirst = rest.slice(sepIdx + 3);
     const secondSepIdx = afterFirst.indexOf(" : ");
     const to = rest.slice(0, sepIdx).trim();
-    const subject = secondSepIdx === -1 ? afterFirst.trim() : afterFirst.slice(0, secondSepIdx).trim();
+    const subject =
+      secondSepIdx === -1 ? afterFirst.trim() : afterFirst.slice(0, secondSepIdx).trim();
     const body = secondSepIdx === -1 ? "" : afterFirst.slice(secondSepIdx + 3).trim();
     if (!to || !subject || !body) {
       return [

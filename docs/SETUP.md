@@ -85,9 +85,9 @@ rocketchat/
 
 | File                  | Safe to Delete? | What Happens                                   |
 | --------------------- | --------------- | ---------------------------------------------- |
-| `admin.json`          | ✅ Yes           | Next setup will re-prompt for admin login      |
-| `admin.json.bak`      | ✅ Yes           | Just a backup; doesn't affect anything         |
-| `bot-<username>.json` | ❌ No            | Bot can't reconnect; use `!remove-bot` instead |
+| `admin.json`          | ✅ Yes          | Next setup will re-prompt for admin login      |
+| `admin.json.bak`      | ✅ Yes          | Just a backup; doesn't affect anything         |
+| `bot-<username>.json` | ❌ No           | Bot can't reconnect; use `!remove-bot` instead |
 
 ## Remove a Bot
 
@@ -154,10 +154,10 @@ Without the correct credentials, these commands will not work.
 
 ### Overview
 
-| Purpose  | Option 1 (Simplest)       | Option 2 (Recommended / more robust)     |
-|----------|---------------------------|------------------------------------------|
-| **Send**   | Environment variables     | `~/.netrc` (Linux/macOS)                 |
-| **Fetch**  | Environment variables     | systemd / shell profile / permanent env  |
+| Purpose   | Option 1 (Simplest)   | Option 2 (Recommended / more robust)    |
+| --------- | --------------------- | --------------------------------------- |
+| **Send**  | Environment variables | `~/.netrc` (Linux/macOS)                |
+| **Fetch** | Environment variables | systemd / shell profile / permanent env |
 
 ---
 
@@ -306,12 +306,12 @@ If a skill shows ❌, set the corresponding credentials and restart the gateway.
 
 ## Troubleshooting Setup
 
-| Issue                     | Fix                                                                                  |
-| ------------------------- | ------------------------------------------------------------------------------------ |
-| "Can't connect to server" | Check server URL is correct + reachable                                              |
-| "Admin login failed"      | Verify admin username/password; try deleting `admin.json` and re-running setup       |
-| "Bot creation failed"     | Check you have admin rights; try manual `!add-bot` after setup                       |
-| "2FA keeps failing"       | Check TOTP app time is synced; email OTP expires after ~5 min                        |
+| Issue                     | Fix                                                                                   |
+| ------------------------- | ------------------------------------------------------------------------------------- |
+| "Can't connect to server" | Check server URL is correct + reachable                                               |
+| "Admin login failed"      | Verify admin username/password; try deleting `admin.json` and re-running setup        |
+| "Bot creation failed"     | Check you have admin rights; try manual `!add-bot` after setup                        |
+| "2FA keeps failing"       | Check TOTP app time is synced; email OTP expires after ~5 min                         |
 | Email send/fetch fails    | Run `!configure` and confirm both show ✅. Restart gateway after changing credentials |
 
 ---
@@ -368,4 +368,7 @@ failed_messages (message_id, room_id, reason) -- debugging: what went wrong
 ```
 
 Limits: 250 seen messages, 100 failed records per bot (auto-pruned).
+
+```
+
 ```

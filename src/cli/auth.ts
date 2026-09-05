@@ -1,9 +1,4 @@
-import {
-  loginAs,
-  TwoFactorRequiredError,
-  isTimeoutError,
-  verifyAdmin,
-} from "./admin-api.js";
+import { loginAs, TwoFactorRequiredError, isTimeoutError, verifyAdmin } from "./admin-api.js";
 import { saveAdmin, loadAdmin } from "./credentials.js";
 import {
   color,
@@ -19,8 +14,7 @@ import type { RCLoginResult } from "../types.js";
 type AdminLoginReason = "not-admin" | "unauthorized" | "unreachable" | "error";
 
 type AdminLoginResult =
-  | { ok: true; auth: RCLoginResult }
-  | { ok: false; reason: AdminLoginReason; message?: string };
+  { ok: true; auth: RCLoginResult } | { ok: false; reason: AdminLoginReason; message?: string };
 
 export async function tryBotLogin(
   rcUrl: string,
@@ -75,7 +69,7 @@ async function loginWithTwoFactor(
             message: "Two-factor method",
             options: methods.map((m) => ({ value: m, label: m })),
           })
-        : methods[0] ?? "totp";
+        : (methods[0] ?? "totp");
 
     if (method === "email") {
       p.log.info(
@@ -112,7 +106,9 @@ async function loginWithTwoFactor(
       }
       const msg = inner instanceof Error ? inner.message : String(inner);
       if (isTimeoutError(inner)) {
-        p.log.error("Server timed out while verifying the code. Check your connection and try again.");
+        p.log.error(
+          "Server timed out while verifying the code. Check your connection and try again.",
+        );
         return null;
       }
       if (/rate.?limit|too many|too many requests/i.test(msg)) {
@@ -204,7 +200,8 @@ export async function resolveAdminAuth(
           return {
             ok: false,
             reason: "error",
-            message: "Server timed out while verifying admin status. Check your connection and try again.",
+            message:
+              "Server timed out while verifying admin status. Check your connection and try again.",
           };
         }
         const message = e instanceof Error ? e.message : String(e);

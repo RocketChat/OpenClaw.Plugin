@@ -3,7 +3,7 @@ name: Publish to ClawHub
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   publish:
@@ -12,33 +12,33 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      
+
       - uses: pnpm/action-setup@v4
         with:
           version: 10.33.0
-      
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-      
+
       - run: pnpm install --frozen-lockfile
-      
+
       - run: pnpm run format:check
         name: Check code formatting
-      
+
       - run: pnpm run build
         name: Build project
-      
+
       - run: pnpm run test
         name: Run tests
-      
+
       # Authenticate with ClawHub
       - name: Authenticate with ClawHub
         env:
           CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
-        run: echo "$CLAWHUB_TOKEN" | clawhub login --token
-      
+        run: clawhub login --token "$CLAWHUB_TOKEN"
+
       # Publish to ClawHub
       - name: Publish to ClawHub
         run: |
@@ -48,7 +48,7 @@ jobs:
             --source-commit ${{ github.sha }} \
             --source-ref ${{ github.ref_name }} \
             --wait
-      
+
       # Create GitHub release (optional but nice)
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
