@@ -1,14 +1,11 @@
 ---
-
 name: cron
 description: "Schedule one-shot and recurring reminders via openclaw cron CLI. Use exec, NOT the cron tool (restricted to cron job context)."
 metadata:
-{
-"openclaw": {
-"emoji": "⏰",
-"requires": { "bins": ["openclaw"] }
-}
-}
+  openclaw:
+    emoji: "⏰"
+    requires:
+      bins: ["openclaw"]
 ---
 
 # Cron / Reminders
@@ -33,7 +30,7 @@ If the `add` command errors, paste the real error and stop. Do not paper over fa
 - NEVER use `--session main` for non-default agents; use `--session isolated`.
 - NEVER let the reminder payload trigger an action. A reminder is a NOTE to the user, not a task. Use `--command 'echo "<reminder text>"'` so the text is relayed verbatim via `--announce`. Do NOT use `--message` with an instruction the agent will try to execute (e.g. `--message "check your email"` made the agent actually try to fetch email and fail). For a plain "remind me to X" reminder, always use the `--command echo` form below.
 - NEVER use a `sleep`/background-process workaround (`sleep 120 && echo ...`, `nohup ... &`, `at`, shell loops, etc.). A background `sleep` does NOT deliver to chat — it only echoes into a detached shell and is NOT a reminder. Always create the reminder with `openclaw cron add`.
-- NEVER claim "cron is disabled" / "cron is globally disabled" / "cron triggers are disabled". Cron is ENABLED. Only the agent's built-in `cron` _tool_ is denied (that is exactly why you must use the `openclaw cron add` CLI). If `openclaw cron add` errors, report the REAL error — do not invent a workaround or a disabled-system excuse.
+- NEVER claim "cron is disabled" / "cron is globally disabled" / "cron triggers are disabled". Cron is ENABLED. Only the agent's built-in `cron` *tool* is denied (that is exactly why you must use the `openclaw cron add` CLI). If `openclaw cron add` errors, report the REAL error — do not invent a workaround or a disabled-system excuse.
 
 ## How to handle ANY reminder request (free-form)
 

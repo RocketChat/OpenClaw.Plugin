@@ -1,14 +1,11 @@
 ---
-
 name: email
 description: "Send emails via s-nail, read inbox via the fetch-emails script (reads password from env/config)."
 metadata:
-{
-"openclaw": {
-"emoji": "📧",
-"requires": { "bins": ["s-nail", "fetch-emails"] }
-}
-}
+  openclaw:
+    emoji: "📧"
+    requires:
+      bins: ["s-nail", "fetch-emails"]
 ---
 
 # Email
