@@ -605,7 +605,7 @@ function sendEmail(to: string, subject: string, body: string): Promise<string> {
   if (!to || !subject || !body) {
     return Promise.resolve("Email parameters cannot be empty.");
   }
-  
+
   // Basic email validation
   if (!to.includes("@") || to.includes("\n") || to.includes("\0")) {
     return Promise.resolve(`Invalid email address: ${to}`);
@@ -617,9 +617,7 @@ function sendEmail(to: string, subject: string, body: string): Promise<string> {
   }
 
   const from = process.env.EMAIL_FROM?.trim();
-  const argv = from 
-    ? ["-s", subject, "-S", `from=${from}`, to] 
-    : ["-s", subject, to];
+  const argv = from ? ["-s", subject, "-S", `from=${from}`, to] : ["-s", subject, to];
 
   return new Promise((resolvePromise) => {
     try {
@@ -635,9 +633,7 @@ function sendEmail(to: string, subject: string, body: string): Promise<string> {
       child.stderr?.on("data", (d) => err.push(String(d)));
 
       child.on("error", (e) =>
-        resolvePromise(
-          ["Failed to send email.", "```", String(e.message || e), "```"].join("\n"),
-        ),
+        resolvePromise(["Failed to send email.", "```", String(e.message || e), "```"].join("\n")),
       );
 
       child.on("close", (code) => {

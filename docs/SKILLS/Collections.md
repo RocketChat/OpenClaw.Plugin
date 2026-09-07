@@ -28,6 +28,7 @@ Inside each skill's folder, add a `SKILL.md` file describing what the skill does
 ```
 
 A `SKILL.md` typically includes:
+
 - A YAML frontmatter block (`name`, `description`, `metadata`)
 - Usage instructions, required binaries, and any hard rules the agent must follow
 
@@ -47,7 +48,6 @@ These two are directly accessible from the **command menu**.
 ## 4. Skills beyond the command menu
 
 Not every skill needs to live in the command menu. right now other skills aren't directly triggered from the command menu instead, they're picked up and used automatically through OpenClaw's **inbound message handling**, exactly as OpenClaw is designed to work.
-
 
 ## 5. Explore and add more skills
 

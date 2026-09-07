@@ -1,14 +1,14 @@
-
 ---
+
 name: cron
 description: "Schedule one-shot and recurring reminders via openclaw cron CLI. Use exec, NOT the cron tool (restricted to cron job context)."
 metadata:
-  {
-    "openclaw": {
-      "emoji": "⏰",
-      "requires": { "bins": ["openclaw"] }
-    }
-  }
+{
+"openclaw": {
+"emoji": "⏰",
+"requires": { "bins": ["openclaw"] }
+}
+}
 ---
 
 # Cron / Reminders
@@ -27,12 +27,13 @@ You have `exec` access (`tools.profile: full`, `exec.mode: full`). You are NOT a
 If the `add` command errors, paste the real error and stop. Do not paper over failures with a fake success message.
 
 ## FORBIDDEN — common failures
+
 - NEVER call the `cron.add` tool. Only `openclaw cron add` (CLI) is allowed.
 - NEVER set `trigger.script` (or `payload.kind: "systemEvent"`). `trigger.script` is executed as **JavaScript (code-mode)**, so a shell command like `echo '...'` throws `SyntaxError: expecting ';'`. Put the reminder text in `--message "..."` instead — that is the agent payload and is delivered correctly.
 - NEVER use `--session main` for non-default agents; use `--session isolated`.
 - NEVER let the reminder payload trigger an action. A reminder is a NOTE to the user, not a task. Use `--command 'echo "<reminder text>"'` so the text is relayed verbatim via `--announce`. Do NOT use `--message` with an instruction the agent will try to execute (e.g. `--message "check your email"` made the agent actually try to fetch email and fail). For a plain "remind me to X" reminder, always use the `--command echo` form below.
 - NEVER use a `sleep`/background-process workaround (`sleep 120 && echo ...`, `nohup ... &`, `at`, shell loops, etc.). A background `sleep` does NOT deliver to chat — it only echoes into a detached shell and is NOT a reminder. Always create the reminder with `openclaw cron add`.
-- NEVER claim "cron is disabled" / "cron is globally disabled" / "cron triggers are disabled". Cron is ENABLED. Only the agent's built-in `cron` *tool* is denied (that is exactly why you must use the `openclaw cron add` CLI). If `openclaw cron add` errors, report the REAL error — do not invent a workaround or a disabled-system excuse.
+- NEVER claim "cron is disabled" / "cron is globally disabled" / "cron triggers are disabled". Cron is ENABLED. Only the agent's built-in `cron` _tool_ is denied (that is exactly why you must use the `openclaw cron add` CLI). If `openclaw cron add` errors, report the REAL error — do not invent a workaround or a disabled-system excuse.
 
 ## How to handle ANY reminder request (free-form)
 
@@ -51,6 +52,7 @@ Users will phrase requests unpredictably ("remind me to X in 2 minutes", "ping m
 ### Examples (patterns — adapt to the actual words)
 
 Relative one-shot ("remind me to check email after 2 minutes"):
+
 ```bash
 openclaw cron add \
   --name "Check email" \
@@ -63,6 +65,7 @@ openclaw cron add \
 ```
 
 Absolute one-shot ("remind me tomorrow 3pm"):
+
 ```bash
 openclaw cron add \
   --name "Meeting reminder" \
@@ -75,6 +78,7 @@ openclaw cron add \
 ```
 
 Recurring ("every weekday at 9am standup"):
+
 ```bash
 openclaw cron add \
   --name "Daily standup" \
@@ -101,6 +105,7 @@ openclaw cron rm <job-id> --json
 ```
 
 ## Important flags
+
 - `--agent <id>` — the agent that runs/delivers the job. ALWAYS set this to your own agent id (e.g. `rc-ocrcbot`). Omitting it makes the job run as `main`, which is NOT allowed to deliver to the user's chat and fails with `error-not-allowed`.
 - `--session isolated` — ALWAYS use `isolated`, NEVER use `main`. Using `--session main` causes delivery failures.
 - `--command 'echo "<text>"'` — the reminder payload. Runs on the Gateway and its output is delivered via `--announce`. Use this for plain reminders so the text is relayed verbatim and the agent does NOT perform the task described.
@@ -115,4 +120,3 @@ openclaw cron rm <job-id> --json
 > **Delivery is mandatory with `--session isolated`.** An isolated job runs in a fresh session with no inherited recipient, so omitting `--channel`/`--to` (or having the channel plugin fail to resolve them) causes the runner to abort with "Refusing implicit isolated cron delivery" and the job is disabled. Always pass `--agent <your id> --announce --channel <plugin> --to <target>` together.
 
 > **NEVER use `--session main`.** Always use `--session isolated` + `--agent <your id>`. The `main` session target is not permitted to deliver to the user's chat and fails with `error-not-allowed`.
-
