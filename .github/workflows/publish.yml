@@ -34,6 +34,14 @@ jobs:
 
       - run: pnpm run test
         name: Run tests
+      
+       # Add dist/ to git staging (include in publish)
+      - name: Stage dist for publish
+        run: |
+          git add dist/ --force
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git commit -m "build: dist for v$(node -p 'require(\"./package.json\").version')" || true
 
       # Authenticate with ClawHub
       - name: Authenticate with ClawHub

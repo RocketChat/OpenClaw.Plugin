@@ -121,11 +121,19 @@ function getFileName(record: AttachmentRecord | null, url: string | undefined): 
   }
 }
 
+
+
 function classify(
   mimeType: string | undefined,
   fileName: string | undefined,
 ): InboundAttachmentKind {
   const mime = mimeType ?? (fileName ? mimeTypeFromFilePath(fileName) : undefined);
   const kind = mime ? mediaKindFromMime(mime) : undefined;
+  
+  // Map unsupported kinds to valid ones
+  if (kind === "sticker") {
+    return "image";
+  }
+  
   return kind ?? "unknown";
 }

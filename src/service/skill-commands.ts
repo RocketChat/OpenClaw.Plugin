@@ -601,39 +601,67 @@ async function summarizeEmail(
 }
 
 function sendEmail(to: string, subject: string, body: string): Promise<string> {
+  // Input validation - prevent injection attacks
+  if (!to || !subject || !body) {
+    return Promise.resolve("Email parameters cannot be empty.");
+  }
+  
+  // Basic email validation
+  if (!to.includes("@") || to.includes("\n") || to.includes("\0")) {
+    return Promise.resolve(`Invalid email address: ${to}`);
+  }
+
+  // Sanitize subject and body to prevent shell injection
+  if (subject.includes("\n") || subject.includes("\0")) {
+    return Promise.resolve("Subject contains invalid characters.");
+  }
+
   const from = process.env.EMAIL_FROM?.trim();
-  const argv = from ? ["-s", subject, "-S", `from=${from}`, to] : ["-s", subject, to];
+  const argv = from 
+    ? ["-s", subject, "-S", `from=${from}`, to] 
+    : ["-s", subject, to];
+
   return new Promise((resolvePromise) => {
-    const child = spawn(resolveSNailBin(), argv, {
-      stdio: ["pipe", "pipe", "pipe"],
-      timeout: 30000,
-    });
-    const out: string[] = [];
-    const err: string[] = [];
-    child.stdout?.on("data", (d) => out.push(String(d)));
-    child.stderr?.on("data", (d) => err.push(String(d)));
-    child.on("error", (e) =>
-      resolvePromise(["Failed to send email.", "```", String(e.message || e), "```"].join("\n")),
-    );
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolvePromise(`Email sent to ${to}.`);
-      } else {
+    try {
+      const child = spawn(resolveSNailBin(), argv, {
+        stdio: ["pipe", "pipe", "pipe"],
+        timeout: 30000,
+      });
+
+      const out: string[] = [];
+      const err: string[] = [];
+
+      child.stdout?.on("data", (d) => out.push(String(d)));
+      child.stderr?.on("data", (d) => err.push(String(d)));
+
+      child.on("error", (e) =>
         resolvePromise(
-          [
-            `s-nail exited with code ${code}.`,
-            "```",
-            (err.join("") || out.join("") || "no output").trim(),
-            "```",
-          ].join("\n"),
-        );
-      }
-    });
-    child.stdin?.write(body);
-    child.stdin?.end();
+          ["Failed to send email.", "```", String(e.message || e), "```"].join("\n"),
+        ),
+      );
+
+      child.on("close", (code) => {
+        if (code === 0) {
+          resolvePromise(`Email sent to ${to}.`);
+        } else {
+          resolvePromise(
+            [
+              `s-nail exited with code ${code}.`,
+              "```",
+              (err.join("") || out.join("") || "no output").trim(),
+              "```",
+            ].join("\n"),
+          );
+        }
+      });
+
+      child.stdin?.write(body);
+      child.stdin?.end();
+    } catch (e) {
+      resolvePromise(["Failed to send email.", "```", String(e), "```"].join("\n"));
+    }
   });
 }
-
 export async function runEmailCommand(ctx: CommandContext, argStr: string): Promise<string> {
   const trimmed = argStr.trim();
   if (!trimmed || trimmed === "help") {
