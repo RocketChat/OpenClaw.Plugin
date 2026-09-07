@@ -34,8 +34,8 @@ jobs:
 
       - run: pnpm run test
         name: Run tests
-      
-       # Add dist/ to git staging (include in publish)
+
+        # Add dist/ to git staging (include in publish)
       - name: Stage dist for publish
         run: |
           git add dist/ --force
