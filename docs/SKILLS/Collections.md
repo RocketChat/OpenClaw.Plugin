@@ -4,20 +4,20 @@ Skills let you extend what your OpenClaw agent can do from sending emails to sch
 
 ## 1. Create the skills folder
 
-Skills live **outside** your workspace, in your home directory root:
+Skills live inside your OpenClaw workspace, in the `skills` subfolder:
 
 ```bash
-mkdir -p ~/.openclaw/skills
+mkdir -p ~/.openclaw/workspace/skills
 ```
 
-Each skill gets its own subfolder inside `~/.openclaw/skills/`.
+Each skill gets its own subfolder inside `~/.openclaw/workspace/skills/`.
 
 ## 2. Add a skill
 
 Inside each skill's folder, add a `SKILL.md` file describing what the skill does and how to use it.
 
 ```
-~/.openclaw/skills/
+~/.openclaw/workspace/skills/
 ├── email/
 │   └── SKILL.md
 ├── cron/
@@ -43,7 +43,7 @@ Two ready-made example skills are included to get you started:
 
 These two are directly accessible from the **command menu**.
 
-> Copy the contents of the reference file into `~/.openclaw/skills/<skill-name>/SKILL.md` to use it as-is, or edit it to fit your setup.
+> Copy the contents of the reference file into `~/.openclaw/workspace/skills/<skill-name>/SKILL.md` to use it as-is, or edit it to fit your setup.
 
 ## 4. Skills beyond the command menu
 
