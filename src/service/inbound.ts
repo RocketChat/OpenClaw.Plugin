@@ -9,6 +9,7 @@ import type {
 import type { RocketChatClient } from "../client/rest.js";
 import type { GroupHistoryEntry } from "./group-history.js";
 import { parsePluginConfig } from "../config/schema.js";
+import { dirname } from "node:path";
 
 const DEFAULT_OWNER_ONLY_SKILLS = ["email"];
 
@@ -241,21 +242,53 @@ async function buildMediaContext(
   const mediaUrls: string[] = [];
   const mediaPaths: string[] = [];
   const mediaTypes: string[] = [];
+  const attachmentPaths: string[] = [];
+  const attachmentUrls: string[] = [];
+  const attachmentContentTypes: string[] = [];
+  const attachmentDirs: string[] = [];
+  const attachmentIndexes: number[] = [];
 
+  let index = 0;
   for (const r of results) {
     if (!r) continue;
     if (r.kind === "path") {
       mediaPaths.push(r.value);
+      attachmentPaths.push(r.value);
+      attachmentDirs.push(dirname(r.value));
     } else {
       mediaUrls.push(r.value);
+      attachmentUrls.push(r.value);
     }
-    if (r.mimeType) mediaTypes.push(r.mimeType);
+    if (r.mimeType) {
+      mediaTypes.push(r.mimeType);
+      attachmentContentTypes.push(r.mimeType);
+    }
+    attachmentIndexes.push(index);
+    index += 1;
   }
 
   return {
     ...(mediaUrls.length > 0 ? { MediaUrl: mediaUrls[0], MediaUrls: mediaUrls } : {}),
     ...(mediaPaths.length > 0 ? { MediaPath: mediaPaths[0], MediaPaths: mediaPaths } : {}),
     ...(mediaTypes.length > 0 ? { MediaType: mediaTypes[0], MediaTypes: mediaTypes } : {}),
+    ...(attachmentUrls.length > 0
+      ? { AttachmentUrl: attachmentUrls[0], AttachmentUrls: attachmentUrls }
+      : {}),
+    ...(attachmentPaths.length > 0
+      ? { AttachmentPath: attachmentPaths[0], AttachmentPaths: attachmentPaths }
+      : {}),
+    ...(attachmentContentTypes.length > 0
+      ? {
+          AttachmentContentType: attachmentContentTypes[0],
+          AttachmentContentTypes: attachmentContentTypes,
+        }
+      : {}),
+    ...(attachmentDirs.length > 0
+      ? { AttachmentDir: attachmentDirs[0], AttachmentDirs: attachmentDirs }
+      : {}),
+    ...(attachmentIndexes.length > 0
+      ? { AttachmentIndex: attachmentIndexes[0], AttachmentIndexes: attachmentIndexes }
+      : {}),
   };
 }
 

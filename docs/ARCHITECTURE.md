@@ -123,6 +123,33 @@ Plugin DDP Client
 | **Post**          | DDP: send typing stop signal; REST: post message          |
 | **Attachments**   | Download → upload via REST → attach reference             |
 
+### Inbound media context
+
+`buildMediaContext()` (`src/service/inbound.ts`) downloads inbound Rocket.Chat file
+attachments to temp paths (or keeps URLs) and exposes them to OpenClaw core media
+understanding. It emits **both** the legacy `Media*` fields and the newer
+`Attachment*` compatibility names, so all the following context keys are available:
+
+| Family          | Keys                                                                  |
+| --------------- | --------------------------------------------------------------------- |
+| **Path**        | `MediaPath`/`MediaPaths`, `AttachmentPath`/`AttachmentPaths`           |
+| **URL**         | `MediaUrl`/`MediaUrls`, `AttachmentUrl`/`AttachmentUrls`               |
+| **Type/MIME**   | `MediaType`/`MediaTypes`, `AttachmentContentType`/`AttachmentContentTypes` |
+| **Directory**   | `AttachmentDir`/`AttachmentDirs` (path dirname)                        |
+| **Index**       | `AttachmentIndex`/`AttachmentIndexes`                                  |
+
+Media understanding in core reads the `MediaPath`/`MediaUrls`/`MediaType` family
+via `normalizeAttachments()`; the `Attachment*` names are the current CLI-template
+tokens the docs reference.
+
+> **Why the audio CLI config uses `{{MediaPath}}`, not `{{AttachmentPath}}`**
+> For a `whisper-cli` audio CLI entry, core's `resolveCliMediaPath()` transcodes
+> non-WAV audio (e.g. Rocket.Chat `.ogg` voice notes) to a 16 kHz mono WAV and sets
+> that converted path as `templCtx.MediaPath`. `{{AttachmentPath}}` resolves to the
+> **original** (unconverted) file from the inbound context and would bypass that
+> transcode. Keep `{{MediaPath}}` in `tools.media.audio.models[].args` so
+> whisper-cli always receives the transcoded WAV.
+
 ## Commands
 
 Commands are parsed by `CommandParser.parse()` and route three ways:
