@@ -37,9 +37,9 @@ A `SKILL.md` typically includes:
 Two ready-made example skills are included to get you started:
 
 - **`email`** : send/read email via `s-nail` and `fetch-emails`
-  Reference: [SKILLS/Email.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/SKILLS/Email.md)
+  Reference: [SKILLS/Email.md](./Email.md)
 - **`cron`** : schedule one-shot and recurring reminders via the `openclaw cron` CLI
-  Reference: [SKILLS/CronJobs.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/SKILLS/CronJobs.md)
+  Reference: [SKILLS/CronJobs.md](./CronJobs.md)
 
 These two are directly accessible from the **command menu**.
 
