@@ -1,11 +1,10 @@
 import type { InboundEvent } from "../types.js";
 import type { ChannelRuleOptions } from "../types.js";
-import { DM_SCOPE, CommandParser } from "../utils.js";
+import { DM_SCOPE, CommandParser, resolveOpenClawDir } from "../utils.js";
 import { RocketChatClient } from "../client/rest.js";
 import type { RCLoginResult } from "../types.js";
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
-import { resolve } from "node:path";
-import { homedir } from "node:os";
+import { resolve, join } from "node:path";
 import {
   readConfig,
   readDefaultModel,
@@ -491,9 +490,9 @@ function parseSkillFrontmatter(content: string): { name?: string; description?: 
 }
 
 function runSkills(showOwnerOnly: boolean): string {
-  const skillsDir = resolve(homedir(), ".openclaw", "skills");
+  const skillsDir = join(resolveOpenClawDir(), "workspace", "skills");
   if (!existsSync(skillsDir)) {
-    return "No skills installed (expected at ~/.openclaw/skills).";
+    return "No skills installed (expected at ~/.openclaw/workspace/skills).";
   }
   const entries = readdirSync(skillsDir).filter((name) => {
     const full = resolve(skillsDir, name);
@@ -518,7 +517,7 @@ function runSkills(showOwnerOnly: boolean): string {
     skills.push({ name: fm.name, description: fm.description ?? "" });
   }
   if (skills.length === 0) {
-    return "No skills installed (expected at ~/.openclaw/skills).";
+    return "No skills installed (expected at ~/.openclaw/workspace/skills).";
   }
   const cap = (s: string, n = 80): string => (s.length > n ? s.slice(0, n).trimEnd() + "…" : s);
   const lines = ["**Skills**"];
