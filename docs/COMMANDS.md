@@ -92,10 +92,10 @@ Control how the agent responds.
 
 ## Tools & Skills
 
-| Command         | Description                            |
-| --------------- | -------------------------------------- |
-| `!tools`        | List tools available to the agent      |
-| `!skill <name>` | Run a skill (handled by OpenClaw core) |
+| Command   | Description                                  |
+| --------- | -------------------------------------------- |
+| `!tools`  | List tools available to the agent            |
+| `!skills` | List installed skills (use via inbound chat) |
 
 ## Cron Jobs
 

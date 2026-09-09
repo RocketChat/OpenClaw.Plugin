@@ -1,8 +1,10 @@
 import type { InboundEvent } from "../types.js";
 import type { ChannelRuleOptions } from "../types.js";
-import { DM_SCOPE, CommandParser } from "../utils.js";
+import { DM_SCOPE, CommandParser, resolveOpenClawDir } from "../utils.js";
 import { RocketChatClient } from "../client/rest.js";
 import type { RCLoginResult } from "../types.js";
+import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
+import { resolve, join } from "node:path";
 import {
   readConfig,
   readDefaultModel,
@@ -203,6 +205,8 @@ async function runCommand(
       return await runModel(argStr);
     case "tools":
       return { action: "openclaw-command", command: `/tools${argStr ? " " + argStr : ""}` };
+    case "skills":
+      return { action: "reply", replyText: runSkills() };
     case "cron":
       return { action: "reply", replyText: await runCronCommand(ctx, argStr) };
     case "think":
@@ -267,7 +271,13 @@ function buildHelpText(showAll: boolean): string {
         ["verbose on/off", "debug details"],
       ],
     ],
-    ["Cron", [["cron <interval> <task>", "one-shot reminder; run `!cron` for full usage"]]],
+    [
+      "Cron & Skills",
+      [
+        ["cron <interval> <task>", "one-shot reminder; run `!cron` for full usage"],
+        ["skills", "list installed skills (use via inbound chat)"],
+      ],
+    ],
   ];
 
   const visibleGroups = groups
@@ -425,6 +435,59 @@ function runBots(): string {
   }
 
   return ["**Bot accounts**", ...lines].join("\n");
+}
+
+function runSkills(): string {
+  const skillsDir = join(resolveOpenClawDir(), "workspace", "skills");
+  if (!existsSync(skillsDir)) {
+    return "No skills installed (expected at ~/.openclaw/workspace/skills).";
+  }
+  const entries = readdirSync(skillsDir).filter((name) => {
+    const full = resolve(skillsDir, name);
+    try {
+      return statSync(full).isDirectory() || statSync(full).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  });
+  const skills: Array<{ name: string; description: string }> = [];
+  for (const name of entries) {
+    const skillMd = resolve(skillsDir, name, "SKILL.md");
+    if (!existsSync(skillMd)) continue;
+    let content = "";
+    try {
+      content = readFileSync(skillMd, "utf8");
+    } catch {
+      continue;
+    }
+    const fm = parseSkillFrontmatter(content);
+    if (!fm.name) continue;
+    skills.push({ name: fm.name, description: fm.description ?? "" });
+  }
+  if (skills.length === 0) {
+    return "No skills installed (expected at ~/.openclaw/workspace/skills).";
+  }
+  const cap = (s: string, n = 200): string => (s.length > n ? s.slice(0, n).trimEnd() + "…" : s);
+  const lines = ["**Installed skills**", ""];
+  lines.push("Use a skill via inbound chat with the agent.");
+  for (const s of skills) {
+    const title = s.name.charAt(0).toUpperCase() + s.name.slice(1);
+    lines.push("", `**${title}**`);
+    lines.push(`• ${s.description ? cap(s.description) : "No description available."}`);
+  }
+  return lines.join("\n");
+}
+
+function parseSkillFrontmatter(content: string): { name?: string; description?: string } {
+  const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
+  if (!fmMatch) return {};
+  const fm = fmMatch[1]!;
+  const result: { name?: string; description?: string } = {};
+  const nameLine = fm.match(/^name:\s*(.+)$/m);
+  if (nameLine) result.name = nameLine[1]!.trim().replace(/^["']|["']$/g, "");
+  const descLine = fm.match(/^description:\s*(.+)$/m);
+  if (descLine) result.description = descLine[1]!.trim().replace(/^["']|["']$/g, "");
+  return result;
 }
 
 async function runGroups(ctx: CommandContext): Promise<string> {
