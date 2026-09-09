@@ -10,9 +10,7 @@ metadata:
 
 # Email
 
-## Send (use s-nail, NOT himalaya)
-
-himalaya is blocked for sending. Use s-nail instead.
+## Send (use s-nail)
 
 Sending requires SMTP or Agentmail credentials configured on the gateway (via env vars, `~/.netrc`, or the OpenClaw core skill config).
 

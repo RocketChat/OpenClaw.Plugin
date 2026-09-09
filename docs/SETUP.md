@@ -78,7 +78,6 @@ rocketchat/
 ├── access.db           # Access grants (who can use which bot/room)
 ├── <botId>.db          # Seen messages + failures (per bot)
 ├── rate-limit.json     # Bot creation cooldown state
-└── skills-status.json  # Email skill setup status
 ```
 
 ### Credentials: What's Safe to Delete

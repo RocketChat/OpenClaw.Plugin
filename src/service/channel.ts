@@ -5,6 +5,7 @@ import { RocketChatClient } from "../client/rest.js";
 import type { RCLoginResult } from "../types.js";
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { resolve, join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import {
   readConfig,
   readDefaultModel,
@@ -479,15 +480,18 @@ function runSkills(): string {
 }
 
 function parseSkillFrontmatter(content: string): { name?: string; description?: string } {
-  const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
-  if (!fmMatch) return {};
-  const fm = fmMatch[1]!;
-  const result: { name?: string; description?: string } = {};
-  const nameLine = fm.match(/^name:\s*(.+)$/m);
-  if (nameLine) result.name = nameLine[1]!.trim().replace(/^["']|["']$/g, "");
-  const descLine = fm.match(/^description:\s*(.+)$/m);
-  if (descLine) result.description = descLine[1]!.trim().replace(/^["']|["']$/g, "");
-  return result;
+  const lines = content.split("\n");
+  const openIdx = lines[0]?.trim() === "---" ? 0 : -1;
+  if (openIdx === -1) return {};
+  const closeIdx = lines.findIndex((l, i) => i > openIdx && l.trim() === "---");
+  if (closeIdx === -1) return {};
+  const data = parseYaml(lines.slice(openIdx + 1, closeIdx).join("\n")) as
+    { name?: unknown; description?: unknown } | null | undefined;
+  if (typeof data !== "object" || data === null) return {};
+  return {
+    ...(typeof data.name === "string" ? { name: data.name } : {}),
+    ...(typeof data.description === "string" ? { description: data.description } : {}),
+  };
 }
 
 async function runGroups(ctx: CommandContext): Promise<string> {
