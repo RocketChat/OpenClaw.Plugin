@@ -26,8 +26,8 @@ export const EMAIL_USAGE = [
   "• Fetch via email skill: `!email fetch <count> [account]` (max 20)",
   "• Summarize via email skill + agent: `!email summarize <count> [account]` (max 10)",
   "",
-  "ℹ️ `!email send` is for quick, simple emails. For professional emails, use inbound chat.",
-  "⚠️ Don't use ` : ` (space-colon-space) in the subject — it's the separator for the format.",
+  "`!email send` is for quick, simple emails. For professional emails, use inbound chat.",
+  "Don't use ` : ` (space-colon-space) in the subject it's the separator for the format.",
 ].join("\n");
 
 export const CONFIGURE_HEADING = "**Configure**";

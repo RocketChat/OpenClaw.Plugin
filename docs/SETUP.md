@@ -102,11 +102,10 @@ This deletes:
 - Bot user from Rocket.Chat server
 - Bot config + credentials
 - Agent workspace
-- All associated data
 
 ## Clean Everything Up
 
-To completely remove the plugin from your machine:
+To completely remove the plugin from your machine so it doesn't take space in your machine:
 
 ```bash
 # Delete all Rocket.Chat plugin data
@@ -123,6 +122,33 @@ rm -rf ~/.openclaw/media/inbound/
 ```
 agents/rc-<username>/   # Dedicated agent config + sessions
 ```
+
+### Per-Bot (Per-Agent) Model Config
+
+Each bot is backed by an agent entry in `agents.list[]` inside `~/.openclaw/openclaw.json`. You can give each bot its own primary model and an automatic fallback chain (tried on overload/timeout) without touching the global default:
+
+```json
+{
+  "agents": {
+    "list": [
+      {
+        "id": "rc-openclaw2nd",
+        "model": {
+          "primary": "nvidia-nim/claude-3-freecc-no-thinking/nvidia_nim/nvidia/nemotron-3-super-120b-a12b",
+          "fallbacks": ["openrouter/google/gemini-2.0-flash-thinking-exp:free", "ollama/mistral:7b"]
+        }
+      }
+    ]
+  }
+}
+```
+
+- `model.primary` → `<provider>/<model>` used for that bot's replies (omit to inherit `agents.defaults.model`).
+- `model.fallbacks` → ordered refs tried automatically when the primary is overloaded or times out.
+- The per-agent provider/model catalog lives at `agents/<id>/agent/models.json`.
+- Restart the gateway after edits: `openclaw gateway restart`.
+
+See ARCHITECTURE.md → "Per-Agent (Per-Bot) Config" for the full structure.
 
 ## Media (Temporary)
 
@@ -147,172 +173,14 @@ Optional overrides for paths and email skills. Set these in your shell before st
 
 ---
 
-## Email Setup (for command menu email skill)
-
-Email skills enable the `!email send` and `!email fetch` commands in Rocket.Chat.  
-Without the correct credentials, these commands will not work.
-
-### Overview
-
-| Purpose   | Option 1 (Simplest)   | Option 2 (Recommended / more robust)    |
-| --------- | --------------------- | --------------------------------------- |
-| **Send**  | Environment variables | `~/.netrc` (Linux/macOS)                |
-| **Fetch** | Environment variables | systemd / shell profile / permanent env |
-
----
-
-### Option 1 – Environment Variables Only (works on all OS)
-
-This is the quickest way and works on Linux, macOS, and Windows.
-
-```bash
-# Send + Fetch (Gmail App Password)
-export EMAIL_SMTP_USER="you@gmail.com"
-export EMAIL_SMTP_PASS="xxxx xxxx xxxx xxxx"   # Gmail App Password
-export GMAIL_APP_PASSWORD="xxxx xxxx xxxx xxxx"
-export GMAIL_ACCOUNT="you@gmail.com"
-export EMAIL_FROM="you@gmail.com"
-```
-
-**Windows (PowerShell):**
-
-```powershell
-$env:EMAIL_SMTP_USER = "you@gmail.com"
-$env:EMAIL_SMTP_PASS = "xxxx xxxx xxxx xxxx"
-$env:GMAIL_APP_PASSWORD = "xxxx xxxx xxxx xxxx"
-$env:GMAIL_ACCOUNT = "you@gmail.com"
-$env:EMAIL_FROM = "you@gmail.com"
-```
-
-Then restart the gateway:
-
-```bash
-openclaw gateway restart
-```
-
-> Tip: To make these permanent, add them to your shell profile (`~/.zshrc`, `~/.bashrc`, `$PROFILE`) or System Environment Variables on Windows.
-
----
-
-### Option 2 – OS-native / recommended methods
-
-#### Sending Emails
-
-**Linux & macOS (recommended)** – use `~/.netrc` (no environment variables needed):
-
-```bash
-nano ~/.netrc
-```
-
-Add:
-
-```
-machine smtp.gmail.com login you@gmail.com password "xxxx xxxx xxxx xxxx"
-```
-
-Lock the file:
-
-```bash
-chmod 0600 ~/.netrc
-```
-
-`s-nail` will pick this up automatically.
-
-**Windows** – stick with Option 1 (environment variables). There is no clean equivalent of `~/.netrc` for this use case.
-
-#### Fetching Emails (Gmail App Password)
-
-You still need a Gmail **App Password** (not your normal password).  
-Generate one at: Google Account → Security → 2-Step Verification → App passwords → “Mail”.
-
-**Linux (systemd – best for production):**
-
-```bash
-systemctl --user edit --full openclaw-gateway.service
-```
-
-Add under `[Service]`:
-
-```
-Environment="GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx"
-Environment=GMAIL_ACCOUNT=you@gmail.com
-Environment=EMAIL_FROM=you@gmail.com
-```
-
-**Important:** Quote the entire `KEY=value` pair because Gmail app passwords contain spaces.
-
-Reload & restart:
-
-```bash
-systemctl --user daemon-reload
-systemctl --user restart openclaw-gateway.service
-```
-
-Verify the password loaded:
-
-```bash
-systemctl --user show openclaw-gateway.service -p Environment | grep GMAIL
-```
-
-> Note: OpenClaw may regenerate the service file on updates. Re-check and re-add these lines after each upgrade.
-
-**macOS / Linux (shell profile):**
-
-```bash
-# ~/.zshrc, ~/.bashrc or ~/.profile
-export GMAIL_APP_PASSWORD="xxxx xxxx xxxx xxxx"
-export GMAIL_ACCOUNT="you@gmail.com"
-export EMAIL_FROM="you@gmail.com"
-```
-
-Then:
-
-```bash
-source ~/.zshrc   # or the file you edited
-openclaw gateway restart
-```
-
-**Windows** – use Option 1 (environment variables) and make them permanent via System Properties or `$PROFILE`.
-
----
-
-### Getting the Keys
-
-- **Gmail App Password** (for fetch):  
-  Google Account → Security → 2-Step Verification → App passwords → generate one for "Mail".
-
-- **SMTP credentials** (for send):  
-  Use `smtp.gmail.com` with the same App Password. Prefer `~/.netrc` on Linux/macOS.
-
-### Verifying Setup
-
-In Rocket.Chat run:
-
-```
-!configure
-```
-
-You should see something like:
-
-```
-Email Configuration:
-Send:  ✅ netrc / SMTP configured
-Fetch: ✅ Gmail app password configured
-```
-
-If a skill shows ❌, set the corresponding credentials and restart the gateway.
-
----
-
 ## Troubleshooting Setup
 
-| Issue                     | Fix                                                                                   |
-| ------------------------- | ------------------------------------------------------------------------------------- |
-| "Can't connect to server" | Check server URL is correct + reachable                                               |
-| "Admin login failed"      | Verify admin username/password; try deleting `admin.json` and re-running setup        |
-| "Bot creation failed"     | Check you have admin rights; try manual `!add-bot` after setup                        |
-| "2FA keeps failing"       | Check TOTP app time is synced; email OTP expires after ~5 min                         |
-| Email send/fetch fails    | Run `!configure` and confirm both show ✅. Restart gateway after changing credentials |
+| Issue                     | Fix                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------ |
+| "Can't connect to server" | Check server URL is correct + reachable                                        |
+| "Admin login failed"      | Verify admin username/password; try deleting `admin.json` and re-running setup |
+| "Bot creation failed"     | Check you have admin rights; try manual `!add-bot` after setup                 |
+| "2FA keeps failing"       | Check TOTP app time is synced; email OTP expires after ~5 min                  |
 
 ---
 
@@ -368,7 +236,3 @@ failed_messages (message_id, room_id, reason) -- debugging: what went wrong
 ```
 
 Limits: 250 seen messages, 100 failed records per bot (auto-pruned).
-
-```
-
-```
