@@ -10,11 +10,9 @@ metadata:
 
 # Email
 
-## Send (use s-nail, NOT himalaya)
+## Send (use s-nail)
 
-himalaya is blocked for sending. Use s-nail instead.
-
-Sending requires SMTP or Agentmail credentials configured on the gateway (see `!configure`).
+Sending requires SMTP or Agentmail credentials configured on the gateway (via env vars, `~/.netrc`, or the OpenClaw core skill config).
 
 ```bash
 echo "Body text here" | s-nail -s "Subject" recipient@example.com
@@ -38,7 +36,6 @@ fetch-emails 5 <account>
 
 ## CRITICAL rules
 
-- NEVER use himalaya for sending — it's blocked
 - NEVER pass $GMAIL_APP_PASSWORD in any command — fetch-emails reads it from the environment (or `~/.config/gmail/`) internally
 - Pass an explicit `<account>` unless `GMAIL_ACCOUNT` is set — never assume a default
 - Present the fetched result exactly ONCE — do not re-fetch or re-summarize the same data

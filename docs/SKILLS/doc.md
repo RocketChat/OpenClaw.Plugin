@@ -39,19 +39,15 @@ Two ready-made example skills are included to get you started:
 - **`email`** : send/read email via `s-nail` and `fetch-emails`
   Reference: [SKILLS/Email.md](./Email.md)
 - **`cron`** : schedule one-shot and recurring reminders via the `openclaw cron` CLI
-  Reference: [SKILLS/CronJobs.md](./CronJobs.md)
+  Reference: [SKILLS/Cron.md](./Cron.md)
 
-These two are directly accessible from the **command menu**.
+Of these, the `cron` skill is exposed natively in the command menu (`!cron`). The `email` skill is used like any other skill via OpenClaw core (`!skill <name>`).
 
 > Copy the contents of the reference file into `~/.openclaw/workspace/skills/<skill-name>/SKILL.md` to use it as-is, or edit it to fit your setup.
 
-## 4. Skills beyond the command menu
-
-Not every skill needs to live in the command menu. right now other skills aren't directly triggered from the command menu instead, they're picked up and used automatically through OpenClaw's **inbound message handling**, exactly as OpenClaw is designed to work.
-
 ## 5. Explore and add more skills
 
-Want more skills? Check out:
+Want more skills and install them like npm packages ? Check out:
 
 - 🔗 Awesome OpenClaw Skills (community repo): [https://github.com/VoltAgent/awesome-openclaw-skills](https://github.com/VoltAgent/awesome-openclaw-skills)
 - 🔗 Skills website: [https://clawskills.sh/](https://clawskills.sh/)

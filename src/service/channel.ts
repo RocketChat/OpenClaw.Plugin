@@ -5,6 +5,7 @@ import { RocketChatClient } from "../client/rest.js";
 import type { RCLoginResult } from "../types.js";
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { resolve, join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import {
   readConfig,
   readDefaultModel,
@@ -39,17 +40,7 @@ import { loadAdmin, removeBotCredentials } from "../cli/credentials.js";
 import { startGateway } from "./gateway.js";
 import { activeClients, connectionStatus } from "./runtime-state.js";
 import { AccessStore } from "../config/access-store.js";
-import {
-  runCronCommand,
-  runEmailCommand,
-  runConfigureCommand,
-  CRON_USAGE,
-  CRON_HEADING,
-  EMAIL_USAGE,
-  EMAIL_HEADING,
-  CONFIGURE_USAGE,
-  CONFIGURE_HEADING,
-} from "./skill-commands.js";
+import { runCronCommand } from "./skill-commands.js";
 
 const BROADCAST_MENTIONS = new Set(["here", "all", "everyone"]);
 
@@ -152,8 +143,6 @@ const OWNER_ONLY_COMMANDS = new Set([
   "revoke",
   "access",
   "bots",
-  "email",
-  "configure",
 ]);
 
 function isOwner(ctx: CommandContext): boolean {
@@ -217,37 +206,10 @@ async function runCommand(
       return await runModel(argStr);
     case "tools":
       return { action: "openclaw-command", command: `/tools${argStr ? " " + argStr : ""}` };
-    case "skill": {
-      const skillName = argStr.trim().split(/\s+/)[0] ?? "";
-      const owner = isOwner(ctx);
-      if (skillName.toLowerCase() === "cron") {
-        return { action: "reply", replyText: [CRON_HEADING, CRON_USAGE].join("\n") };
-      }
-      if (
-        (skillName.toLowerCase() === "email" || skillName.toLowerCase() === "configure") &&
-        !owner
-      ) {
-        return {
-          action: "reply",
-          replyText: `\`!skill ${skillName}\` is owner-only. Contact ${ctx.account.owner ? `@${ctx.account.owner}` : "the bot owner"}.`,
-        };
-      }
-      if (skillName.toLowerCase() === "email") {
-        return { action: "reply", replyText: [EMAIL_HEADING, EMAIL_USAGE].join("\n") };
-      }
-      if (skillName.toLowerCase() === "configure") {
-        return { action: "reply", replyText: [CONFIGURE_HEADING, CONFIGURE_USAGE].join("\n") };
-      }
-      return { action: "openclaw-command", command: `/skill${argStr ? " " + argStr : ""}` };
-    }
     case "skills":
-      return { action: "reply", replyText: runSkills(isOwner(ctx)) };
+      return { action: "reply", replyText: runSkills() };
     case "cron":
       return { action: "reply", replyText: await runCronCommand(ctx, argStr) };
-    case "email":
-      return { action: "reply", replyText: await runEmailCommand(ctx, argStr) };
-    case "configure":
-      return { action: "reply", replyText: runConfigureCommand() };
     case "think":
       return { action: "openclaw-command", command: `/think${argStr ? " " + argStr : ""}` };
     case "abort":
@@ -311,11 +273,10 @@ function buildHelpText(showAll: boolean): string {
       ],
     ],
     [
-      "Tools & Skills",
+      "Cron & Skills",
       [
-        ["tools", "list agent tools"],
-        ["skills", "installed skills"],
-        ["skill <name>", "run a skill"],
+        ["cron <interval> <task>", "one-shot reminder; run `!cron` for full usage"],
+        ["skills", "list installed skills (use via inbound chat)"],
       ],
     ],
   ];
@@ -477,19 +438,7 @@ function runBots(): string {
   return ["**Bot accounts**", ...lines].join("\n");
 }
 
-function parseSkillFrontmatter(content: string): { name?: string; description?: string } {
-  const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
-  if (!fmMatch) return {};
-  const fm = fmMatch[1]!;
-  const result: { name?: string; description?: string } = {};
-  const nameLine = fm.match(/^name:\s*(.+)$/m);
-  if (nameLine) result.name = nameLine[1]!.trim().replace(/^["']|["']$/g, "");
-  const descLine = fm.match(/^description:\s*(.+)$/m);
-  if (descLine) result.description = descLine[1]!.trim().replace(/^["']|["']$/g, "");
-  return result;
-}
-
-function runSkills(showOwnerOnly: boolean): string {
+function runSkills(): string {
   const skillsDir = join(resolveOpenClawDir(), "workspace", "skills");
   if (!existsSync(skillsDir)) {
     return "No skills installed (expected at ~/.openclaw/workspace/skills).";
@@ -519,25 +468,30 @@ function runSkills(showOwnerOnly: boolean): string {
   if (skills.length === 0) {
     return "No skills installed (expected at ~/.openclaw/workspace/skills).";
   }
-  const cap = (s: string, n = 80): string => (s.length > n ? s.slice(0, n).trimEnd() + "…" : s);
-  const lines = ["**Skills**"];
-  const has = (name: string): boolean => skills.some((s) => s.name === name);
-  lines.push("", CRON_HEADING, CRON_USAGE);
-  if (showOwnerOnly) {
-    if (has("email") || has("agentmail")) {
-      lines.push("", EMAIL_HEADING, EMAIL_USAGE);
-    }
-    lines.push("", CONFIGURE_HEADING, CONFIGURE_USAGE);
-  }
+  const cap = (s: string, n = 200): string => (s.length > n ? s.slice(0, n).trimEnd() + "…" : s);
+  const lines = ["**Installed skills**", ""];
+  lines.push("Use a skill via inbound chat with the agent.");
   for (const s of skills) {
-    if (s.name === "cron" || s.name === "email" || s.name === "agentmail") continue;
-    if (!showOwnerOnly && s.name === "configure") continue;
     const title = s.name.charAt(0).toUpperCase() + s.name.slice(1);
     lines.push("", `**${title}**`);
     lines.push(`• ${s.description ? cap(s.description) : "No description available."}`);
-    lines.push(`• Run with: \`!skill ${s.name}\``);
   }
   return lines.join("\n");
+}
+
+function parseSkillFrontmatter(content: string): { name?: string; description?: string } {
+  const lines = content.split("\n");
+  const openIdx = lines[0]?.trim() === "---" ? 0 : -1;
+  if (openIdx === -1) return {};
+  const closeIdx = lines.findIndex((l, i) => i > openIdx && l.trim() === "---");
+  if (closeIdx === -1) return {};
+  const data = parseYaml(lines.slice(openIdx + 1, closeIdx).join("\n")) as
+    { name?: unknown; description?: unknown } | null | undefined;
+  if (typeof data !== "object" || data === null) return {};
+  return {
+    ...(typeof data.name === "string" ? { name: data.name } : {}),
+    ...(typeof data.description === "string" ? { description: data.description } : {}),
+  };
 }
 
 async function runGroups(ctx: CommandContext): Promise<string> {
