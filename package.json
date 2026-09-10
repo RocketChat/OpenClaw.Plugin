@@ -58,7 +58,6 @@
     "access": "public"
   },
   "devDependencies": {
-    "@clack/core": "1.4.3",
     "@types/node": "^25.9.1",
     "@types/ws": "^8.18.1",
     "esbuild": "^0.28.1",
@@ -68,6 +67,7 @@
     "typescript": "^6.0.3"
   },
   "dependencies": {
+    "@clack/core": "1.4.3",
     "@rocket.chat/ddp-client": "^1.1.1",
     "@clack/prompts": "^1.7.0",
     "commander": "^15.0.0",
