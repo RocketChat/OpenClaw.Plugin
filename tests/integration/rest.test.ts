@@ -28,11 +28,16 @@ describe.skipIf(skip)("RocketChatClient – Integration", () => {
     expect(subs.length).toBeGreaterThan(0);
 
     const dmRoom = subs.find((s) => s.t === "d") ?? subs[0]!;
-    const messageId = await client.postMessage(dmRoom.rid, "[integration-test] E2E postMessage check");
+    const messageId = await client.postMessage(
+      dmRoom.rid,
+      "[integration-test] E2E postMessage check",
+    );
 
     expect(typeof messageId).toBe("string");
     expect(messageId.length).toBeGreaterThan(0);
-    console.log(`[integration] postMessage → messageId: ${messageId} in room: ${dmRoom.name ?? dmRoom.rid}`);
+    console.log(
+      `[integration] postMessage → messageId: ${messageId} in room: ${dmRoom.name ?? dmRoom.rid}`,
+    );
   });
 
   it("should resolve bot identity", async () => {

@@ -10,7 +10,12 @@ import {
   inviteToGroup,
   sendMessage,
 } from "./admin-api.js";
-import { ensureAgentForBot, isAgentBound, readAllAccounts, updateConfig } from "./config-updater.js";
+import {
+  ensureAgentForBot,
+  isAgentBound,
+  readAllAccounts,
+  updateConfig,
+} from "./config-updater.js";
 import { loadAdmin } from "./credentials.js";
 import { resolveAdminAuth } from "./auth.js";
 import { resolveBotAuth } from "./bot.js";

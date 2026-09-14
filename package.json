@@ -20,7 +20,7 @@
   },
   "type": "module",
   "scripts": {
-    "build": "rm -rf dist && npm run manifest && tsc && npm run bundle && chmod -R 755 dist",
+    "build": "rm -rf dist && npm run manifest && tsc && npm run bundle && chmod -R 755 dist && npm run format",
     "bundle": "esbuild src/client/ddp.ts --bundle --format=esm --platform=node --outfile=dist/client/ddp.js --sourcemap --external:openclaw --external:@openclaw/*",
     "manifest": "tsx scripts/gen-manifest.mts",
     "format": "prettier --write .",

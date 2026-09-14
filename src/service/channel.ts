@@ -445,13 +445,19 @@ function runSkills(ctx?: CommandContext): string {
     const agentId = `rc-${ctx.accountId}`;
     const agentWs = getAgentWorkspaceDir(agentId);
     scannedDirs.push({ path: join(agentWs, "skills"), scope: "Private" });
-    scannedDirs.push({ path: resolve(resolveOpenClawDir(), "agents", agentId, "skills"), scope: "Private" });
+    scannedDirs.push({
+      path: resolve(resolveOpenClawDir(), "agents", agentId, "skills"),
+      scope: "Private",
+    });
   }
 
   scannedDirs.push({ path: join(resolveOpenClawDir(), "workspace", "skills"), scope: "Global" });
   scannedDirs.push({ path: join(resolveOpenClawDir(), "skills"), scope: "Global" });
 
-  const skillsMap = new Map<string, { name: string; description: string; scope: "Private" | "Global" }>();
+  const skillsMap = new Map<
+    string,
+    { name: string; description: string; scope: "Private" | "Global" }
+  >();
 
   for (const { path: skillsDir, scope } of scannedDirs) {
     if (!existsSync(skillsDir)) continue;

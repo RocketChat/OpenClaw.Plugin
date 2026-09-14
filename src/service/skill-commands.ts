@@ -148,7 +148,11 @@ function parseCronJobsResponse(stdout: string): Array<Record<string, unknown>> {
   try {
     const parsed = JSON.parse(stdout);
     if (Array.isArray(parsed)) return parsed;
-    if (parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).jobs)) {
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      Array.isArray((parsed as Record<string, unknown>).jobs)
+    ) {
       return (parsed as Record<string, unknown>).jobs as Array<Record<string, unknown>>;
     }
   } catch {
@@ -168,8 +172,7 @@ async function cronList(ctx: CommandContext): Promise<string> {
     for (const job of jobs) {
       const name = String(job.name ?? job.id ?? "unknown");
       const schedule = job.schedule as
-        | { kind?: string; everyMs?: number; at?: string; cron?: string }
-        | undefined;
+        { kind?: string; everyMs?: number; at?: string; cron?: string } | undefined;
       const everyMs = schedule?.everyMs;
       const scheduleDesc =
         schedule?.kind === "every"
@@ -200,10 +203,7 @@ async function cronStop(ctx: CommandContext, name: string): Promise<string> {
     const target = jobs.find((j) => {
       const jobName = String(j.name ?? j.id ?? "");
       const search = name.trim().toLowerCase();
-      return (
-        jobName.toLowerCase() === search ||
-        String(j.id ?? "").toLowerCase() === search
-      );
+      return jobName.toLowerCase() === search || String(j.id ?? "").toLowerCase() === search;
     });
     if (!target) {
       return `No job named or matching ID \`${name}\` found for this bot. Use \`!cron list\` to see jobs.`;

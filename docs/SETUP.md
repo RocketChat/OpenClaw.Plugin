@@ -96,7 +96,7 @@ Use the command (owner-only):
 !remove-bot <username...>
 ```
 
-This deletes the bot from the server and cleans up its local files automatically. 
+This deletes the bot from the server and cleans up its local files automatically.
 
 If you need to manually delete a bot's files (for example, if the command fails), you must remove these specific files and directories:
 

@@ -10,8 +10,6 @@ import type { RocketChatClient } from "../client/rest.js";
 import type { GroupHistoryEntry } from "./group-history.js";
 import { dirname } from "node:path";
 
-
-
 export async function dispatchInboundEventWithChannelRuntime(params: {
   cfg: OpenClawConfigLike;
   accountId: string;
@@ -179,7 +177,9 @@ async function buildMediaContext(
           return { kind: "path" as const, value: filePath, mimeType: attachment.mimeType };
         } catch (error: any) {
           if (client && roomId) {
-            client.postMessage(roomId, `⚠️ ${error.message || "Failed to download attachment."}`).catch(() => {});
+            client
+              .postMessage(roomId, `⚠️ ${error.message || "Failed to download attachment."}`)
+              .catch(() => {});
           }
           return null;
         }

@@ -592,8 +592,6 @@ function applyBinding(
   }
 }
 
-
-
 function stripBindingsForAccount(cfg: Record<string, any>, accountId: string): void {
   const bindings = cfg?.bindings as Array<Record<string, any>> | undefined;
   if (!bindings) return;

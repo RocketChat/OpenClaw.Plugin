@@ -72,13 +72,17 @@ You should see `gateway - online` and `runtime - ready`.
 | [CONTRIBUTING.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/CONTRIBUTING.md)      | Contributors guide                                     |
 
 ## Media Storage & Handling
-When users send media (images, audio, etc.) in Rocket.Chat, the plugin downloads the files locally to `~/.openclaw/media/inbound/`. 
+
+When users send media (images, audio, etc.) in Rocket.Chat, the plugin downloads the files locally to `~/.openclaw/media/inbound/`.
+
 - **Why locally?** This allows the OpenClaw agent to reliably process the actual file bytes from the filesystem rather than struggling with URL authentication or timeouts.
 - **Limits**: The plugin currently caps downloads at **20MB** per file and supports `image/`, `audio/`, `video/`, and `application/` MIME types.
 - **Cleanup**: Currently, there is no automatic auto-prune for these files. We recommend users set up a cron job to clean up the folder periodically, e.g.: `find ~/.openclaw/media/inbound -type f -mtime +7 -delete`.
 
 ## Roadmap / Leftovers
-*Future enhancements currently being tracked:*
+
+_Future enhancements currently being tracked:_
+
 - [ ] Expanding End-to-End (E2E) and integration test coverage across the repository.
 - [ ] Preparing project for official v1 release.
 - [ ] Addressing remaining bugs and structural updates from our internal trackers:

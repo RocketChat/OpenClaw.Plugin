@@ -16,9 +16,7 @@
           "transport": {
             "mode": "websocket"
           },
-          "mentionNames": [
-            "botname"
-          ],
+          "mentionNames": ["botname"],
           "owner": "admin-user"
         }
       }
@@ -34,9 +32,7 @@
     }
   ],
   "plugins": {
-    "allow": [
-      "rocketchat"
-    ],
+    "allow": ["rocketchat"],
     "entries": {
       "rocketchat": {
         "enabled": true

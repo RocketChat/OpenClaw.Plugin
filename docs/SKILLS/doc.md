@@ -35,7 +35,6 @@ A `SKILL.md` typically includes:
 
 Two ready-made example skills are included to get you started:
 
-
 - **`cron`** : schedule one-shot and recurring reminders via the `openclaw cron` CLI
   Reference: [SKILLS/Cron.md](./Cron.md)
 
