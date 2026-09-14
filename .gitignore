@@ -4,6 +4,3 @@ package-lock.json
 node_modules
 dist
 .pnpm-store/
-ROADMAP.md
-preview.md
-revert.txt

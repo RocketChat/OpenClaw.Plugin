@@ -96,25 +96,29 @@ Use the command (owner-only):
 !remove-bot <username...>
 ```
 
-This deletes:
+This deletes the bot from the server and cleans up its local files automatically. 
 
-- Bot user from Rocket.Chat server
-- Bot config + credentials
-- Agent workspace
+If you need to manually delete a bot's files (for example, if the command fails), you must remove these specific files and directories:
+
+1. **Credentials**: `~/.openclaw/credentials/rocketchat/bot-<username>.json`
+2. **Database**: `~/.openclaw/rocketchat/<botId>.db`
+3. **Workspace/Memory**: `~/.openclaw/workspace/rc-<username>/` (if using the default rc- agent)
+4. **Agent Config**: `~/.openclaw/agents/rc-<username>/`
 
 ## Clean Everything Up
 
-To completely remove the plugin from your machine so it doesn't take space in your machine:
+To completely remove the plugin's data and cache from your machine so it doesn't take space:
 
 ```bash
 # Delete all Rocket.Chat plugin data
 rm -rf ~/.openclaw/credentials/rocketchat/
 rm -rf ~/.openclaw/rocketchat/
 rm -rf ~/.openclaw/agents/rc-*/
+rm -rf ~/.openclaw/workspace/rc-*/
 rm -rf ~/.openclaw/media/inbound/
 ```
 
-**Important:** This does **not** delete bot users from your Rocket.Chat server. Use `!remove-bot` first, or manually delete them via Rocket.Chat admin panel.
+**Important:** This does **not** delete bot users from your Rocket.Chat server. Use `!remove-bot` first, or manually delete them via the Rocket.Chat admin panel.
 
 ## Agent Workspaces
 

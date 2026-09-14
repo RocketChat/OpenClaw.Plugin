@@ -97,6 +97,12 @@ Control how the agent responds.
 | `!tools`  | List tools available to the agent            |
 | `!skills` | List installed skills (use via inbound chat) |
 
+### Owner-Only Skills
+Certain powerful skills (e.g. bash execution, file manipulation) are restricted strictly to the **Owner** of the bot for security reasons. 
+- You must be listed in `openclaw.json` under `accounts.<id>.owner` (e.g., `"owner": "admin-user"`).
+- To use an owner-only skill, simply instruct the bot in your DM or a private channel where the bot is present. 
+- Non-owner users who try to invoke owner-only skills will receive an unauthorized error from the bot.
+
 ## Cron Jobs
 
 Schedule one-shot reminders or repeating tasks.

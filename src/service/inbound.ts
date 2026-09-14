@@ -91,7 +91,7 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     OriginatingChannel: "rocketchat",
     OriginatingTo: to,
     ...(isCommand ? { CommandSource: "text" as const, CommandAuthorized: true } : {}),
-    ...(await buildMediaContext(params.event.attachments, params.client)),
+    ...(await buildMediaContext(params.event.attachments, params.event.roomId, params.client)),
   });
 
   await params.channelRuntime.session.recordInboundSession({
@@ -163,6 +163,7 @@ function buildRecipientAddress(event: InboundEvent): string {
 
 async function buildMediaContext(
   attachments: InboundAttachment[],
+  roomId: string,
   client?: RocketChatClient,
 ): Promise<Record<string, unknown>> {
   if (attachments.length === 0) return {};
@@ -176,7 +177,10 @@ async function buildMediaContext(
             attachment.fileName ? { fileName: attachment.fileName } : undefined,
           );
           return { kind: "path" as const, value: filePath, mimeType: attachment.mimeType };
-        } catch {
+        } catch (error: any) {
+          if (client && roomId) {
+            client.postMessage(roomId, `⚠️ ${error.message || "Failed to download attachment."}`).catch(() => {});
+          }
           return null;
         }
       }

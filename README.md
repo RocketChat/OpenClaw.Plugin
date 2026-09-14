@@ -70,3 +70,17 @@ You should see `gateway - online` and `runtime - ready`.
 | [ARCHITECTURE.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/docs/ARCHITECTURE.md) | How the plugin works (DDP + REST, multi-bot, security) |
 | [COMMANDS.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/docs/COMMANDS.md)         | Complete command reference                             |
 | [CONTRIBUTING.md](https://github.com/RocketChat/OpenClaw.Plugin/blob/main/CONTRIBUTING.md)      | Contributors guide                                     |
+
+## Media Storage & Handling
+When users send media (images, audio, etc.) in Rocket.Chat, the plugin downloads the files locally to `~/.openclaw/media/inbound/`. 
+- **Why locally?** This allows the OpenClaw agent to reliably process the actual file bytes from the filesystem rather than struggling with URL authentication or timeouts.
+- **Limits**: The plugin currently caps downloads at **20MB** per file and supports `image/`, `audio/`, `video/`, and `application/` MIME types.
+- **Cleanup**: Currently, there is no automatic auto-prune for these files. We recommend users set up a cron job to clean up the folder periodically, e.g.: `find ~/.openclaw/media/inbound -type f -mtime +7 -delete`.
+
+## Roadmap / Leftovers
+*Future enhancements currently being tracked:*
+- [ ] Expanding End-to-End (E2E) and integration test coverage across the repository.
+- [ ] Preparing project for official v1 release.
+- [ ] Addressing remaining bugs and structural updates from our internal trackers:
+  - [Notion Bug Tracker](https://deserted-education-78a.notion.site/Bugs-to-solve-3cf53cee1e07801b8a25d518f956af23)
+  - [GSOC Submission Gist](https://gist.github.com/dodaa08/883e8d7d5e2e2d17dd345dfafe918eb6)
