@@ -4,8 +4,8 @@ import type { CommandContext } from "./channel.js";
 
 const execFileAsync = promisify(execFile);
 
-export const CRON_HEADING = "**Cron jobs**";
-export const CRON_USAGE = [
+const CRON_HEADING = "**Cron jobs**";
+const CRON_USAGE = [
   "• `!cron <interval> <task>` one-shot reminder (30s | 5m | 2h | 1d)",
   "• `!cron --every <interval> <task>` repeat every interval until stopped",
   "• `!cron list` list running jobs",
@@ -36,7 +36,7 @@ const UNIT_MAP: Record<string, string> = {
   days: "d",
 };
 
-export function parseInterval(
+function parseInterval(
   input: string,
 ): { ok: true; seconds: number; at: string } | { ok: false; error: string } {
   const match = input.trim().match(INTERVAL_RE);
@@ -53,7 +53,7 @@ export function parseInterval(
   return { ok: true, seconds, at: `+${match[1]}${unit}` };
 }
 
-export function deriveName(task: string): string {
+function deriveName(task: string): string {
   const slug = task
     .replace(/\s+/g, " ")
     .trim()
@@ -143,11 +143,24 @@ function parseCronArgs(trimmed: string): CronSubcommand | { ok: false; error: st
   return { type: "schedule", every: false, intervalInput, interval, task };
 }
 
+function parseCronJobsResponse(stdout: string): Array<Record<string, unknown>> {
+  if (!stdout || !stdout.trim()) return [];
+  try {
+    const parsed = JSON.parse(stdout);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && typeof parsed === "object" && Array.isArray((parsed as Record<string, unknown>).jobs)) {
+      return (parsed as Record<string, unknown>).jobs as Array<Record<string, unknown>>;
+    }
+  } catch {
+    /* best effort */
+  }
+  return [];
+}
+
 async function cronList(ctx: CommandContext): Promise<string> {
   try {
     const res = await runOpenClaw(["cron", "list", "--agent", `rc-${ctx.accountId}`, "--json"]);
-    const parsed = JSON.parse(res.stdout || "{}") as { jobs?: Array<Record<string, unknown>> };
-    const jobs = parsed.jobs ?? [];
+    const jobs = parseCronJobsResponse(res.stdout);
     if (jobs.length === 0) {
       return "No cron jobs for this bot.";
     }
@@ -155,7 +168,8 @@ async function cronList(ctx: CommandContext): Promise<string> {
     for (const job of jobs) {
       const name = String(job.name ?? job.id ?? "unknown");
       const schedule = job.schedule as
-        { kind?: string; everyMs?: number; at?: string; cron?: string } | undefined;
+        | { kind?: string; everyMs?: number; at?: string; cron?: string }
+        | undefined;
       const everyMs = schedule?.everyMs;
       const scheduleDesc =
         schedule?.kind === "every"
@@ -182,20 +196,21 @@ async function cronList(ctx: CommandContext): Promise<string> {
 async function cronStop(ctx: CommandContext, name: string): Promise<string> {
   try {
     const listRes = await runOpenClaw(["cron", "list", "--agent", `rc-${ctx.accountId}`, "--json"]);
-    const parsed = JSON.parse(listRes.stdout || "{}") as {
-      jobs?: Array<Record<string, unknown>>;
-    };
-    const jobs = parsed.jobs ?? [];
+    const jobs = parseCronJobsResponse(listRes.stdout);
     const target = jobs.find((j) => {
-      const jobName = String(j.name ?? "");
-      return jobName.toLowerCase() === name.trim().toLowerCase();
+      const jobName = String(j.name ?? j.id ?? "");
+      const search = name.trim().toLowerCase();
+      return (
+        jobName.toLowerCase() === search ||
+        String(j.id ?? "").toLowerCase() === search
+      );
     });
     if (!target) {
-      return `No repeating job named \`${name}\` found for this bot. Use \`!cron list\` to see jobs.`;
+      return `No job named or matching ID \`${name}\` found for this bot. Use \`!cron list\` to see jobs.`;
     }
     const id = String(target.id ?? "");
     await runOpenClaw(["cron", "rm", id, "--json"]);
-    return `Stopped cron job \`${id}\` (\`${String(target.name ?? "")}\`).`;
+    return `Stopped cron job \`${id}\` (\`${String(target.name ?? id)}\`).`;
   } catch (e) {
     const error = e as { stdout?: string; stderr?: string; message?: string };
     return [

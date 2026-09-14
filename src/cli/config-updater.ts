@@ -7,13 +7,15 @@ import {
   rmSync,
   mkdirSync,
 } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, dirname } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import JSON5 from "json5";
+import { OPENCLAW_VERSION } from "openclaw/plugin-sdk/agent-harness-runtime";
 import type { AuthCredentials, JsonObject } from "../types.js";
 
 export const OC_CONFIG_PATH = resolve(homedir(), ".openclaw", "openclaw.json");
+const SHARED_WORKSPACE_DIR = resolve(homedir(), ".openclaw", "workspace");
 
 export type TokenAuth = Extract<AuthCredentials, { mode: "token" }>;
 
@@ -22,11 +24,161 @@ export function readConfig(): JsonObject {
   return JSON5.parse(readFileSync(OC_CONFIG_PATH, "utf-8"));
 }
 
+/**
+ * The OpenClaw core that supports `agents.entries` shipped as 2026.8.1
+ * (the v2026.7.2 betas were released as 2026.8.1). Earlier cores (2026.7.x)
+ * reject `agents.entries` and instead accept the legacy `agents.list` array,
+ * which is only treated as an internal projection.
+ */
+const AGENTS_ENTRIES_MIN_CORE = "2026.8.0";
+
+function parseCoreVersion(version: string): { major: number; minor: number; patch: number } | null {
+  const m = /^(\d+)\.(\d+)\.(\d+)/.exec(version ?? "");
+  if (!m) return null;
+  return { major: Number(m[1]), minor: Number(m[2]), patch: Number(m[3]) };
+}
+
+function coreSupportsAgentsEntries(): boolean {
+  const current = parseCoreVersion(OPENCLAW_VERSION);
+  const min = parseCoreVersion(AGENTS_ENTRIES_MIN_CORE);
+  if (!current || !min) return false;
+  if (current.major !== min.major) return current.major > min.major;
+  if (current.minor !== min.minor) return current.minor > min.minor;
+  return current.patch >= min.patch;
+}
+
 function writeConfig(cfg: JsonObject): void {
+  reconcileAgentListings(cfg as Record<string, any>);
+  const dir = dirname(OC_CONFIG_PATH);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const tmp = OC_CONFIG_PATH + ".tmp";
   writeFileSync(tmp, JSON.stringify(cfg, null, 2) + "\n", "utf-8");
   renameSync(tmp, OC_CONFIG_PATH);
 }
+
+/**
+ * Keep the persisted `agents` block compatible with the running OpenClaw core.
+ *
+ * - Cores >= 2026.8.0 (e.g. 2026.9.2) validate that every non-"main" binding
+ *   `agentId` resolves to a `agents.entries` entry and reject the legacy
+ *   `agents.list` key. Dedicated `rc-*` agents are discovered on disk, but the
+ *   core's config validation does not scan `~/.openclaw/agents/` — it only
+ *   reads `agents.entries`. So each dedicated agent the plugin binds must be
+ *   declared here, otherwise the config is rejected with
+ *   `Unknown agent id "rc-..." (not in agents.entries)` and the bot never
+ *   comes online.
+ * - Cores < 2026.8.0 (2026.7.x) reject `agents.entries` outright, so those keys
+ *   must be scrubbed to keep the whole config valid for them.
+ */
+function reconcileAgentListings(cfg: Record<string, any>): void {
+  const agents = cfg?.agents;
+
+  if (!coreSupportsAgentsEntries()) {
+    if (agents && typeof agents === "object") {
+      delete agents.entries;
+      delete agents.list;
+    }
+    return;
+  }
+
+  if (agents && typeof agents === "object" && agents.list !== undefined) {
+    delete agents.list;
+  }
+
+  const entries = collectRequiredAgentEntries(cfg);
+  if (Object.keys(entries).length === 0) {
+    if (agents && typeof agents === "object") {
+      cfg.agents.entries = { main: {} };
+      // Do not set agents.ownership — unrecognized by core 2026.9.x
+    }
+    return;
+  }
+
+  if (!cfg.agents || typeof cfg.agents !== "object") cfg.agents = {};
+  cfg.agents.entries = entries;
+  // Note: do NOT set agents.ownership here — the key is unrecognized by the core
+  // schema validator and causes gateway reload to be skipped with "Unrecognized key".
+}
+
+/**
+ * Compute the `agents.entries` record that must be persisted for the new-style
+ * cores: every non-"main" agent referenced by a rocketchat binding is declared
+ * (rc-* agents pin `workspace` to the shared ~/.openclaw/workspace), while
+ * user-defined entries are preserved. Plugin-owned `rc-*` entries whose
+ * Rocket.Chat account was removed and that no binding references are pruned.
+ */
+function collectRequiredAgentEntries(cfg: Record<string, any>): Record<string, any> {
+  const result: Record<string, any> = {};
+  const existing = cfg?.agents?.entries;
+  if (existing && typeof existing === "object" && !Array.isArray(existing)) {
+    Object.assign(result, existing);
+  }
+
+  const bindings = cfg?.bindings;
+  const rocketchatBindings = Array.isArray(bindings)
+    ? bindings.filter(
+        (b) =>
+          b &&
+          typeof b === "object" &&
+          b.match &&
+          typeof b.match === "object" &&
+          b.match.channel === "rocketchat",
+      )
+    : [];
+
+  const boundAgentIds = new Set(
+    rocketchatBindings
+      .map((b) => (typeof b.agentId === "string" ? b.agentId : ""))
+      .filter((id) => id.length > 0 && id !== "main"),
+  );
+
+  const accountIds = new Set(
+    (() => {
+      const accounts = cfg?.channels?.rocketchat?.accounts;
+      if (typeof accounts !== "object" || accounts === null) return [];
+      return Object.keys(accounts).filter((id) => id.length > 0);
+    })(),
+  );
+
+  for (const agentId of boundAgentIds) {
+    if (!(agentId in result)) result[agentId] = {};
+  }
+
+  for (const id of Object.keys(result)) {
+    if (!id.startsWith("rc-")) continue;
+    const accountId = id.slice("rc-".length);
+    if (!boundAgentIds.has(id) && !accountIds.has(accountId)) {
+      delete result[id];
+      continue;
+    }
+    const raw = result[id];
+    result[id] = pinRcAgentWorkspace(raw && typeof raw === "object" ? raw : {}, id);
+  }
+
+  return result;
+}
+
+export function getAgentWorkspaceDir(agentId: string): string {
+  return resolve(SHARED_WORKSPACE_DIR, agentId);
+}
+
+/** Dedicated rc-* agents use isolated workspace ~/.openclaw/workspace/<agentId>. */
+function pinRcAgentWorkspace(entry: Record<string, any>, agentId: string): Record<string, any> {
+  const targetWs = getAgentWorkspaceDir(agentId);
+  const current = typeof entry.workspace === "string" ? entry.workspace : "";
+  if (!current || resolve(current) === SHARED_WORKSPACE_DIR) {
+    try {
+      mkdirSync(targetWs, { recursive: true });
+    } catch {
+      /* best-effort */
+    }
+    return { ...entry, workspace: targetWs };
+  }
+  return entry;
+}
+
+// ensureSystemAgent was removed: agents.defaults.systemAgent is a legacy retired key
+// in OpenClaw 2026.9.x and causes "Unrecognized key" config validation errors.
 
 export type ExistingAccount = {
   accountId: string;
@@ -169,6 +321,7 @@ export function updateConfig(opts: {
   mentionNames?: string[];
   auth: TokenAuth;
   owner?: string;
+  agentId?: string;
 
   replaceConnection?: boolean;
 }) {
@@ -224,32 +377,53 @@ export function updateConfig(opts: {
     ...(opts.owner ? { owner: opts.owner.trim().replace(/^@+/, "") } : {}),
   };
 
+  if (opts.agentId) {
+    applyBinding(cfg, {
+      channel: "rocketchat",
+      accountId: opts.accountId,
+      agentId: opts.agentId,
+    });
+  }
+
   writeConfig(cfg);
 }
 
-export function readAgentsList(): Array<{ id: string; name?: string }> {
+function readAgentsList(): Array<{ id: string; name?: string }> {
   const cfg = readConfig() as Record<string, any>;
-  const list = cfg?.agents?.list;
   const agents: Array<{ id: string; name?: string }> = [];
+  const push = (id: string, name?: string): void => {
+    if (agents.some((a) => a.id === id)) return;
+    agents.push(name !== undefined ? { id, name } : { id });
+  };
 
-  if (Array.isArray(list)) {
-    for (const a of list) {
+  const entries = cfg?.agents?.entries;
+  if (entries && typeof entries === "object" && !Array.isArray(entries)) {
+    for (const [id, rawEntry] of Object.entries(entries)) {
+      if (!rawEntry || typeof rawEntry !== "object") continue;
+      const entry = rawEntry as Record<string, unknown>;
+      const name = typeof entry.name === "string" ? entry.name : undefined;
+      push(id, name);
+    }
+  }
+
+  const legacy = cfg?.agents?.list;
+  if (Array.isArray(legacy)) {
+    for (const a of legacy) {
       if (!a || typeof a !== "object") continue;
       const id = typeof a.id === "string" ? a.id : "";
       if (!id) continue;
       const name = typeof a.name === "string" ? a.name : undefined;
-      agents.push(name !== undefined ? { id, name } : { id });
+      push(id, name);
     }
   }
 
   const agentsDir = resolve(homedir(), ".openclaw", "agents");
   if (existsSync(agentsDir)) {
     try {
-      const entries = readdirSync(agentsDir, { withFileTypes: true });
-      for (const e of entries) {
+      const entries2 = readdirSync(agentsDir, { withFileTypes: true });
+      for (const e of entries2) {
         if (!e.isDirectory()) continue;
-        if (agents.some((a) => a.id === e.name)) continue;
-        agents.push({ id: e.name });
+        push(e.name);
       }
     } catch {
       // fall through
@@ -285,6 +459,7 @@ export function addAccount(opts: {
   mentionNames: string[];
   transport?: { mode: "websocket" };
   owner?: string;
+  agentId?: string;
 }): void {
   const cfg = readConfig() as Record<string, any>;
 
@@ -309,6 +484,14 @@ export function addAccount(opts: {
     ...(owner ? { owner } : {}),
   };
 
+  if (opts.agentId) {
+    applyBinding(cfg, {
+      channel: "rocketchat",
+      accountId: opts.accountId,
+      agentId: opts.agentId,
+    });
+  }
+
   writeConfig(cfg);
 }
 
@@ -326,36 +509,25 @@ export function ensureAgentForBot(accountId: string): {
   reason?: string;
 } {
   const dedicatedId = `rc-${accountId}`;
-  if (readAgentsList().some((a) => a.id === dedicatedId)) {
-    return { agentId: dedicatedId, created: false, fallback: false };
-  }
+  const existed = readAgentsList().some((a) => a.id === dedicatedId);
 
   try {
-    const workspace = resolve(homedir(), ".openclaw", "agents", dedicatedId);
-    mkdirSync(resolve(workspace, "agent"), { recursive: true });
-    mkdirSync(resolve(workspace, "sessions"), { recursive: true });
+    const agentDir = resolve(homedir(), ".openclaw", "agents", dedicatedId);
+    mkdirSync(resolve(agentDir, "agent"), { recursive: true });
+    mkdirSync(resolve(agentDir, "sessions"), { recursive: true });
 
-    const stateFile = resolve(workspace, "openclaw-workspace-state.json");
-    if (!existsSync(stateFile)) {
-      writeFileSync(
-        stateFile,
-        JSON.stringify({ version: 1, bootstrapSeededAt: new Date().toISOString() }, null, 2) + "\n",
-      );
+    const staleStateFile = resolve(agentDir, "openclaw-workspace-state.json");
+    if (existsSync(staleStateFile)) {
+      try {
+        rmSync(staleStateFile);
+      } catch {
+        /* best-effort */
+      }
     }
 
-    const cfg = readConfig() as Record<string, any>;
-    if (!cfg.agents) cfg.agents = {};
-    if (!Array.isArray(cfg.agents.list)) cfg.agents.list = [];
-    if (!cfg.agents.list.some((a: any) => a?.id === dedicatedId)) {
-      cfg.agents.list.push({
-        id: dedicatedId,
-        name: dedicatedId,
-        workspace,
-        agentDir: resolve(workspace, "agent"),
-      });
-    }
-    writeConfig(cfg);
-    return { agentId: dedicatedId, created: true, fallback: false };
+    removeLegacyPerBotWorkspace(dedicatedId);
+
+    return { agentId: dedicatedId, created: !existed, fallback: false };
   } catch (err) {
     return {
       agentId: "main",
@@ -382,14 +554,15 @@ function normalizeAgentId(id: string): string {
   return id.trim().toLowerCase();
 }
 
-export function addBinding(opts: {
-  channel: string;
-  accountId: string;
-  agentId: string;
-  peer?: { kind: string; id: string };
-}): void {
-  const cfg = readConfig() as Record<string, any>;
-
+function applyBinding(
+  cfg: Record<string, any>,
+  opts: {
+    channel: string;
+    accountId: string;
+    agentId: string;
+    peer?: { kind: string; id: string };
+  },
+): void {
   if (!cfg.bindings) cfg.bindings = [];
   const bindings = cfg.bindings as Array<Record<string, any>>;
 
@@ -417,20 +590,16 @@ export function addBinding(opts: {
   } else {
     bindings.push(binding);
   }
-
-  writeConfig(cfg);
 }
 
-export function removeBindingsForAccount(accountId: string): void {
-  const cfg = readConfig() as Record<string, any>;
+
+
+function stripBindingsForAccount(cfg: Record<string, any>, accountId: string): void {
   const bindings = cfg?.bindings as Array<Record<string, any>> | undefined;
   if (!bindings) return;
-
   cfg.bindings = bindings.filter(
     (b) => !(b.match?.channel === "rocketchat" && b.match?.accountId === accountId),
   );
-
-  writeConfig(cfg);
 }
 
 export function removeAccount(accountId: string): void {
@@ -439,24 +608,52 @@ export function removeAccount(accountId: string): void {
   if (accounts) {
     delete accounts[accountId];
   }
+  stripBindingsForAccount(cfg, accountId);
   writeConfig(cfg);
 }
 
 export function removeAgentDir(accountId: string): void {
   const dir = resolve(homedir(), ".openclaw", "agents", `rc-${accountId}`);
+  const agentWs = resolve(dir, "workspace");
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
   removeWorkspaceAttestations(dir);
+  removeWorkspaceAttestations(agentWs);
+  removeLegacyPerBotWorkspace(`rc-${accountId}`);
+}
+
+function removeLegacyPerBotWorkspace(agentId: string): void {
+  const wsDir = getAgentWorkspaceDir(agentId);
+  if (existsSync(wsDir) && resolve(wsDir) !== SHARED_WORKSPACE_DIR) {
+    rmSync(wsDir, { recursive: true, force: true });
+    removeWorkspaceAttestations(wsDir);
+  }
+}
+
+let didMigrateRcWorkspaces = false;
+
+/** Pin rc-* agents to the shared workspace and drop leftover workspace/rc-* dirs. */
+export function migrateRcWorkspacesIfNeeded(): void {
+  if (didMigrateRcWorkspaces) return;
+  didMigrateRcWorkspaces = true;
+
+  try {
+    if (existsSync(SHARED_WORKSPACE_DIR)) {
+      const entries = readdirSync(SHARED_WORKSPACE_DIR, { withFileTypes: true });
+      for (const e of entries) {
+        if (e.isDirectory() && e.name.startsWith("rc-")) {
+          removeLegacyPerBotWorkspace(e.name);
+        }
+      }
+    }
+  } catch {
+    /* best-effort */
+  }
 
   const cfg = readConfig() as Record<string, any>;
-  const list = cfg?.agents?.list;
-  if (Array.isArray(list)) {
-    const next = list.filter(
-      (a: any) => !(a && typeof a.id === "string" && a.id === `rc-${accountId}`),
-    );
-    if (next.length !== list.length) {
-      cfg.agents.list = next;
-      writeConfig(cfg);
-    }
+  const before = JSON.stringify(cfg);
+  reconcileAgentListings(cfg);
+  if (JSON.stringify(cfg) !== before) {
+    writeConfig(cfg);
   }
 }
 

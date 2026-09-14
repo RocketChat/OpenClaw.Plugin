@@ -133,32 +133,7 @@ Owner-only commands: `add-bot`, `remove-bot`, `add-group`, `revoke`, `access`, `
 
 Non-owners see a permission error when trying owner-only commands.
 
-### Owner-only skills (natural language)
 
-Beyond `!commands`, a lent/granted user can also ask the bot to perform actions in natural
-language (e.g. "send an email to ..."). To block owner-level skills from non-owners, each bot
-carries a guardrail instruction that tells the agent to refuse those skills unless the requester
-is the bot owner.
-
-Configure the list per account in `openclaw.json` under `channels.rocketchat.accounts.<id>`:
-
-```json
-{
-  "channels": {
-    "rocketchat": {
-      "accounts": {
-        "<bot-id>": {
-          "owner": "adminusername",
-          "ownerOnlySkills": ["email"]
-        }
-      }
-    }
-  }
-}
-```
-
-If `ownerOnlySkills` is omitted, it defaults to `["email"]`. The guardrail is injected only for
-non-owner senders with valid access; the owner's messages are unaffected.
 
 ## Unknown Command
 

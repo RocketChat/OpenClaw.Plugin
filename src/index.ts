@@ -1,5 +1,5 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/core";
-import { rocketchatPlugin, startGateway } from "./plugin.js";
+import { rocketchatPlugin } from "./plugin.js";
 
 export { startGateway } from "./plugin.js";
 

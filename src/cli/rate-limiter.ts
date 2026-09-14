@@ -3,9 +3,9 @@ import { homedir } from "node:os";
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { readAllAccounts } from "./config-updater.js";
 
-export const DEFAULT_MAX_ACCOUNTS = 10;
-export const DEFAULT_MAX_BOTS_PER_SERVER = 5;
-export const DEFAULT_COOLDOWN_MS = 60_000;
+const DEFAULT_MAX_ACCOUNTS = 10;
+const DEFAULT_MAX_BOTS_PER_SERVER = 5;
+const DEFAULT_COOLDOWN_MS = 60_000;
 export const DEFAULT_MAX_RECONNECTS = 20;
 
 const STATE_DIR = resolve(homedir(), ".openclaw", "rocketchat");
@@ -50,15 +50,12 @@ export interface BotCreationLimit {
   remainingCooldownMs?: number;
 }
 
-export function checkBotCreationLimit(
-  source: "cli" | "inline",
-  options?: {
-    maxAccounts?: number | undefined;
-    maxBotsPerServer?: number | undefined;
-    cooldownMs?: number | undefined;
-    serverUrl?: string;
-  },
-): BotCreationLimit {
+export function checkBotCreationLimit(options?: {
+  maxAccounts?: number | undefined;
+  maxBotsPerServer?: number | undefined;
+  cooldownMs?: number | undefined;
+  serverUrl?: string;
+}): BotCreationLimit {
   const maxAccounts = options?.maxAccounts ?? DEFAULT_MAX_ACCOUNTS;
   const maxBotsPerServer = options?.maxBotsPerServer ?? DEFAULT_MAX_BOTS_PER_SERVER;
   const cooldownMs = options?.cooldownMs ?? DEFAULT_COOLDOWN_MS;

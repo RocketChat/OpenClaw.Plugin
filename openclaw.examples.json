@@ -271,14 +271,7 @@
         "maxConcurrent": 8
       },
       "imageModel": "nvidia-nim/anthropic/nvidia_nim/meta/llama-3.2-11b-vision-instruct"
-    },
-    "list": [
-      {
-        "id": "main",
-        "default": true,
-        "workspace": "/home/USERNAME/.openclaw/workspace"
-      }
-    ]
+    }
   },
   "tools": {
     "profile": "full",
@@ -398,9 +391,7 @@
       "cron": {
         "enabled": true
       },
-      "email": {
-        "enabled": true
-      }
+
     }
   },
   "bindings": [],

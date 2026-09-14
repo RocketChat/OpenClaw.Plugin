@@ -8,55 +8,9 @@ import type {
 } from "../types.js";
 import type { RocketChatClient } from "../client/rest.js";
 import type { GroupHistoryEntry } from "./group-history.js";
-import { parsePluginConfig } from "../config/schema.js";
 import { dirname } from "node:path";
 
-const DEFAULT_OWNER_ONLY_SKILLS = ["email"];
 
-function readAccountPolicy(
-  cfg: OpenClawConfigLike,
-  accountId: string,
-): { owner: string | undefined; ownerOnlySkills: string[] } {
-  try {
-    const nested = cfg.channels?.rocketchat;
-    const parsed = nested
-      ? parsePluginConfig(nested as never)
-      : cfg && typeof cfg === "object" && "accounts" in cfg
-        ? parsePluginConfig(cfg as never)
-        : { accounts: {} };
-    const account = parsed.accounts[accountId];
-    return {
-      owner: account?.owner,
-      ownerOnlySkills:
-        account?.ownerOnlySkills && account.ownerOnlySkills.length > 0
-          ? account.ownerOnlySkills
-          : DEFAULT_OWNER_ONLY_SKILLS,
-    };
-  } catch {
-    return { owner: undefined, ownerOnlySkills: [] };
-  }
-}
-
-function normalizeName(name: string): string {
-  return name.trim().replace(/^@+/, "").toLowerCase();
-}
-
-function buildOwnerOnlyGuardrail(
-  senderName: string,
-  owner: string | undefined,
-  ownerOnlySkills: string[],
-): string {
-  if (!owner || ownerOnlySkills.length === 0) return "";
-  if (normalizeName(senderName) === normalizeName(owner)) return "";
-  return [
-    ``,
-    `[SECURITY POLICY]`,
-    `The sender (@${senderName}) is NOT the bot owner (@${owner}).`,
-    `You MUST refuse any request that uses the following owner-only skills: ${ownerOnlySkills.join(", ")}.`,
-    `If the user asks for any of these, politely decline and explain that only @${owner} can do it.`,
-    `[/SECURITY POLICY]`,
-  ].join("\n");
-}
 
 export async function dispatchInboundEventWithChannelRuntime(params: {
   cfg: OpenClawConfigLike;
@@ -103,23 +57,19 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
 
   const bodyForAgent = buildBodyForAgent(params.event, params.groupHistory);
 
-  const { owner, ownerOnlySkills } = readAccountPolicy(params.cfg, params.accountId);
-  const guardrail = buildOwnerOnlyGuardrail(params.event.senderName, owner, ownerOnlySkills);
-  const bodyForAgentWithGuardrail = guardrail ? `${bodyForAgent}\n\n${guardrail}` : bodyForAgent;
-
   const body = params.channelRuntime.reply.formatAgentEnvelope({
     channel: "Rocket.Chat",
     from: buildConversationLabel(params.event),
     timestamp,
     previousTimestamp,
     envelope: envelopeOptions,
-    body: bodyForAgentWithGuardrail,
+    body: bodyForAgent,
   });
 
   const isCommand = params.event.text.startsWith("/");
   const ctxPayload = params.channelRuntime.reply.finalizeInboundContext({
     Body: body,
-    BodyForAgent: bodyForAgentWithGuardrail,
+    BodyForAgent: bodyForAgent,
     RawBody: params.event.text,
     CommandBody: params.event.text,
     From: buildSenderAddress(params.event),

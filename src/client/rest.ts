@@ -29,7 +29,7 @@ export class RocketChatClientError extends Error {
   }
 }
 
-export class RocketChatRateLimitError extends RocketChatClientError {
+class RocketChatRateLimitError extends RocketChatClientError {
   readonly retryAfterMs: number;
 
   constructor(message: string, options: { retryAfterMs: number }) {
@@ -295,7 +295,7 @@ export class RocketChatClient {
     const maxRetries = 3;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       await this.ensureInitialized();
-      const signal = init.signal ?? AbortSignal.timeout(15_000);
+      const signal = init.signal ?? AbortSignal.timeout(30_000);
       const response = await this.fetchFn(url.toString(), {
         ...init,
         signal,

@@ -4,6 +4,12 @@ import type { RCLoginResult, RCUser, JsonObject } from "../types.js";
 
 const REQUEST_TIMEOUT_MS = 15_000;
 
+/**
+ * users.create is a heavyweight endpoint (account + roles + email/avatar work on
+ * the server); give it a generous window so slow servers don't abort mid-request.
+ */
+const BOT_CREATE_TIMEOUT_MS = 60_000;
+
 export function isTimeoutError(e: unknown): boolean {
   return e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError");
 }
@@ -40,6 +46,7 @@ type RCFetchOpts = {
   userId?: string;
   authToken?: string;
   raw?: boolean;
+  timeoutMs?: number;
 };
 
 async function adminFetch(
@@ -52,11 +59,15 @@ async function adminFetch(
     headers["X-Auth-Token"] = opts.authToken;
     headers["X-User-Id"] = opts.userId;
   }
-  const res = await fetchWithTimeout(new URL(path, baseUrl), {
-    method: opts.method ?? "POST",
-    headers,
-    ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
-  });
+  const res = await fetchWithTimeout(
+    new URL(path, baseUrl),
+    {
+      method: opts.method ?? "POST",
+      headers,
+      ...(opts.body ? { body: JSON.stringify(opts.body) } : {}),
+    },
+    opts.timeoutMs,
+  );
   const json = (await res.json()) as JsonObject;
   if (!opts.raw && (!res.ok || json.success === false)) {
     const msg = getErrorMessage(json, res.statusText);
@@ -146,11 +157,18 @@ export async function loginAs(
 export async function createBotUser(
   baseUrl: string,
   auth: RCLoginResult,
-  opts: { username: string; name: string; password: string; email: string },
+  opts: {
+    username: string;
+    name: string;
+    password: string;
+    email: string;
+    timeoutMs?: number;
+  },
 ): Promise<RCUser> {
   const json = await adminFetch(baseUrl, "/api/v1/users.create", {
     userId: auth.userId,
     authToken: auth.authToken,
+    timeoutMs: opts.timeoutMs ?? BOT_CREATE_TIMEOUT_MS,
     body: {
       username: opts.username,
       name: opts.name,

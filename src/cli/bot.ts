@@ -1,4 +1,4 @@
-import { createBotUser, getUserInfo } from "./admin-api.js";
+import { createBotUser, getUserInfo, isTimeoutError } from "./admin-api.js";
 import { checkBotCreationLimit, recordBotCreation } from "./rate-limiter.js";
 import { readChannelLimits } from "./config-updater.js";
 import { saveBotCredentials, loadBotCredentials } from "./credentials.js";
@@ -88,7 +88,7 @@ async function createNewBot(
   botUsername: string,
 ): Promise<RCLoginResult | null> {
   const limits = readChannelLimits();
-  const limitCheck = checkBotCreationLimit("cli", {
+  const limitCheck = checkBotCreationLimit({
     serverUrl: rcUrl,
     maxAccounts: limits.maxAccounts,
     maxBotsPerServer: limits.maxBotsPerServer,
@@ -116,7 +116,14 @@ async function createNewBot(
         email: botEmail,
       });
     } catch (e: unknown) {
-      p.log.error(`Failed to create bot: ${e instanceof Error ? e.message : String(e)}`);
+      if (isTimeoutError(e)) {
+        p.log.error(
+          "Failed to create bot: the Rocket.Chat server did not respond within 60s. " +
+            "The bot may have been created anyway - check @${botUsername} in Rocket.Chat, or re-run setup.",
+        );
+      } else {
+        p.log.error(`Failed to create bot: ${e instanceof Error ? e.message : String(e)}`);
+      }
       return null;
     }
   });

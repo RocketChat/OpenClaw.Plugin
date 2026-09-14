@@ -15,17 +15,17 @@ import {
   readOwner,
   readAccount,
   addAccount,
-  addBinding,
   ensureAgentForBot,
-  removeBindingsForAccount,
   removeAccount,
   removeAgentDir,
+  getAgentWorkspaceDir,
   type ExistingAccount,
   type TokenAuth,
 } from "../cli/config-updater.js";
 import {
   createBotUser,
   loginAs,
+  isTimeoutError,
   getGroupByName,
   createDirectMessage,
   sendMessage,
@@ -207,7 +207,7 @@ async function runCommand(
     case "tools":
       return { action: "openclaw-command", command: `/tools${argStr ? " " + argStr : ""}` };
     case "skills":
-      return { action: "reply", replyText: runSkills() };
+      return { action: "reply", replyText: runSkills(ctx) };
     case "cron":
       return { action: "reply", replyText: await runCronCommand(ctx, argStr) };
     case "think":
@@ -438,42 +438,61 @@ function runBots(): string {
   return ["**Bot accounts**", ...lines].join("\n");
 }
 
-function runSkills(): string {
-  const skillsDir = join(resolveOpenClawDir(), "workspace", "skills");
-  if (!existsSync(skillsDir)) {
-    return "No skills installed (expected at ~/.openclaw/workspace/skills).";
+function runSkills(ctx?: CommandContext): string {
+  const scannedDirs: Array<{ path: string; scope: "Private" | "Global" }> = [];
+
+  if (ctx?.accountId) {
+    const agentId = `rc-${ctx.accountId}`;
+    const agentWs = getAgentWorkspaceDir(agentId);
+    scannedDirs.push({ path: join(agentWs, "skills"), scope: "Private" });
+    scannedDirs.push({ path: resolve(resolveOpenClawDir(), "agents", agentId, "skills"), scope: "Private" });
   }
-  const entries = readdirSync(skillsDir).filter((name) => {
-    const full = resolve(skillsDir, name);
-    try {
-      return statSync(full).isDirectory() || statSync(full).isSymbolicLink();
-    } catch {
-      return false;
+
+  scannedDirs.push({ path: join(resolveOpenClawDir(), "workspace", "skills"), scope: "Global" });
+  scannedDirs.push({ path: join(resolveOpenClawDir(), "skills"), scope: "Global" });
+
+  const skillsMap = new Map<string, { name: string; description: string; scope: "Private" | "Global" }>();
+
+  for (const { path: skillsDir, scope } of scannedDirs) {
+    if (!existsSync(skillsDir)) continue;
+    const entries = readdirSync(skillsDir).filter((name) => {
+      const full = resolve(skillsDir, name);
+      try {
+        return statSync(full).isDirectory() || statSync(full).isSymbolicLink();
+      } catch {
+        return false;
+      }
+    });
+
+    for (const name of entries) {
+      const skillMd = resolve(skillsDir, name, "SKILL.md");
+      if (!existsSync(skillMd)) continue;
+      let content = "";
+      try {
+        content = readFileSync(skillMd, "utf8");
+      } catch {
+        continue;
+      }
+      const fm = parseSkillFrontmatter(content);
+      if (!fm.name) continue;
+      const key = fm.name.toLowerCase();
+      if (!skillsMap.has(key)) {
+        skillsMap.set(key, { name: fm.name, description: fm.description ?? "", scope });
+      }
     }
-  });
-  const skills: Array<{ name: string; description: string }> = [];
-  for (const name of entries) {
-    const skillMd = resolve(skillsDir, name, "SKILL.md");
-    if (!existsSync(skillMd)) continue;
-    let content = "";
-    try {
-      content = readFileSync(skillMd, "utf8");
-    } catch {
-      continue;
-    }
-    const fm = parseSkillFrontmatter(content);
-    if (!fm.name) continue;
-    skills.push({ name: fm.name, description: fm.description ?? "" });
   }
+
+  const skills = Array.from(skillsMap.values());
   if (skills.length === 0) {
-    return "No skills installed (expected at ~/.openclaw/workspace/skills).";
+    return "No skills installed.";
   }
   const cap = (s: string, n = 200): string => (s.length > n ? s.slice(0, n).trimEnd() + "…" : s);
   const lines = ["**Installed skills**", ""];
   lines.push("Use a skill via inbound chat with the agent.");
   for (const s of skills) {
     const title = s.name.charAt(0).toUpperCase() + s.name.slice(1);
-    lines.push("", `**${title}**`);
+    const scopeTag = `\`[${s.scope}]\``;
+    lines.push("", `**${title}** ${scopeTag}`);
     lines.push(`• ${s.description ? cap(s.description) : "No description available."}`);
   }
   return lines.join("\n");
@@ -693,7 +712,7 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
   }
 
   try {
-    const limitCheck = checkBotCreationLimit("inline", {
+    const limitCheck = checkBotCreationLimit({
       serverUrl: ctx.account.serverUrl,
       maxAccounts: ctx.limits?.maxAccounts,
       maxBotsPerServer: ctx.limits?.maxBotsPerServer,
@@ -725,8 +744,8 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
       auth: { mode: "token", userId: botAuth.userId, accessToken: botAuth.authToken } as TokenAuth,
       mentionNames: [username],
       ...(ctx.account.owner ? { owner: ctx.account.owner } : {}),
+      agentId: agent,
     });
-    addBinding({ channel: "rocketchat", accountId, agentId: agent });
 
     const owner = ctx.account.owner?.trim().replace(/^@+/, "") || undefined;
 
@@ -762,6 +781,13 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
       ...(dmNote ? [dmNote] : []),
     ].join("\n");
   } catch (e: unknown) {
+    if (isTimeoutError(e)) {
+      return (
+        `Failed to create bot: the Rocket.Chat server did not respond in time. ` +
+        `It may have been created anyway - check the user \`${username}\` on the server, ` +
+        `or use \`!remove-bot ${username}\` before retrying.`
+      );
+    }
     return `Failed to create bot: ${e instanceof Error ? e.message : String(e)}`;
   }
 }
@@ -813,7 +839,6 @@ async function notifyAccessChange(
   roomId: string,
   scopeLabel: string,
   action: "granted" | "revoked",
-  targetIsBot: boolean,
 ): Promise<string | undefined> {
   const botMention = ctx.account.mentionNames[0] ?? ctx.accountId;
   const how =
@@ -889,14 +914,7 @@ async function runLend(ctx: CommandContext, argStr: string): Promise<string> {
 
     const scope = roomId === DM_SCOPE ? "direct messages" : `#${roomName}`;
     if (ok) {
-      const notice = await notifyAccessChange(
-        ctx,
-        cleanUser,
-        roomId,
-        scope,
-        "granted",
-        !!targetUser.roles?.includes("bot"),
-      );
+      const notice = await notifyAccessChange(ctx, cleanUser, roomId, scope, "granted");
       return `Granted ${cleanUser} access to ${ctx.account.mentionNames[0] ?? ctx.accountId} in ${scope}.${notice ?? ""}`;
     }
     return `That grant already exists.`;
@@ -975,14 +993,7 @@ async function runRevoke(ctx: CommandContext, argStr: string): Promise<string> {
 
     const scope = roomId === DM_SCOPE ? "direct messages" : `#${roomName}`;
     if (ok) {
-      const notice = await notifyAccessChange(
-        ctx,
-        cleanUser,
-        roomId,
-        scope,
-        "revoked",
-        !!targetUser.roles?.includes("bot"),
-      );
+      const notice = await notifyAccessChange(ctx, cleanUser, roomId, scope, "revoked");
       return `Revoked ${cleanUser}'s access to ${ctx.account.mentionNames[0] ?? ctx.accountId} in ${scope}.${notice ?? ""}`;
     }
     return `No such grant found. ${cleanUser} did not have access in ${scope}.`;
@@ -1068,15 +1079,8 @@ async function removeSingleBot(
   const steps: string[] = [];
 
   try {
-    removeBindingsForAccount(username);
-    steps.push("OpenClaw binding removed");
-  } catch (e: unknown) {
-    steps.push(`binding cleanup failed: ${e instanceof Error ? e.message : String(e)}`);
-  }
-
-  try {
     removeAccount(username);
-    steps.push("OpenClaw account removed");
+    steps.push("OpenClaw account and binding removed");
   } catch (e: unknown) {
     steps.push(`account cleanup failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -1096,7 +1100,7 @@ async function removeSingleBot(
   if (ownsDedicatedAgent) {
     try {
       removeAgentDir(username);
-      steps.push(`workspace \`rc-${username}\` removed`);
+      steps.push(`agent \`rc-${username}\` removed`);
     } catch (e: unknown) {
       steps.push(`workspace cleanup failed: ${e instanceof Error ? e.message : String(e)}`);
     }

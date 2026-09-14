@@ -1,7 +1,6 @@
 import * as p from "@clack/prompts";
 import color from "picocolors";
 import { Prompt, isCancel, type PromptOptions } from "@clack/core";
-import { isPrivateOrLoopbackHost } from "openclaw/plugin-sdk/ssrf-runtime";
 
 export function normalizeRocketChatUrl(input: string): string | null {
   const trimmed = input.trim();
@@ -20,17 +19,7 @@ export function normalizeRocketChatUrl(input: string): string | null {
   return pathname.length > 1 ? `${url.origin}${pathname}` : url.origin;
 }
 
-export function isLocalRocketChatUrl(input: string): boolean {
-  let url: URL;
-  try {
-    url = new URL(input);
-  } catch {
-    return false;
-  }
-  return isPrivateOrLoopbackHost(url.hostname.toLowerCase());
-}
-
-export function handleCancel(value: unknown): never | void {
+function handleCancel(value: unknown): never | void {
   if (p.isCancel(value)) {
     p.cancel("Setup cancelled.");
     process.exit(0);
@@ -186,22 +175,6 @@ export async function promptSelect<T>(opts: Parameters<typeof p.select>[0]): Pro
   const value = await p.select(opts);
   handleCancel(value);
   return value as T;
-}
-
-export async function promptAutocomplete<T>(
-  opts: Parameters<typeof p.autocomplete>[0],
-): Promise<T> {
-  const value = await p.autocomplete(opts);
-  handleCancel(value);
-  return value as T;
-}
-
-export async function promptAutocompleteMultiselect<T>(
-  opts: Parameters<typeof p.autocompleteMultiselect>[0],
-): Promise<T[]> {
-  const value = await p.autocompleteMultiselect(opts);
-  handleCancel(value);
-  return value as T[];
 }
 
 export async function withSpinner<T>(message: string, task: () => Promise<T>): Promise<T> {

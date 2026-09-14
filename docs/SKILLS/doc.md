@@ -1,6 +1,6 @@
 # OpenClaw Skills
 
-Skills let you extend what your OpenClaw agent can do from sending emails to scheduling reminders to integrating with third-party services.
+Skills let you extend what your OpenClaw agent can do from scheduling reminders to integrating with third-party services.
 
 ## 1. Create the skills folder
 
@@ -18,8 +18,7 @@ Inside each skill's folder, add a `SKILL.md` file describing what the skill does
 
 ```
 ~/.openclaw/workspace/skills/
-├── email/
-│   └── SKILL.md
+
 ├── cron/
 │   └── SKILL.md
 └── agentmail/
@@ -36,12 +35,11 @@ A `SKILL.md` typically includes:
 
 Two ready-made example skills are included to get you started:
 
-- **`email`** : send/read email via `s-nail` and `fetch-emails`
-  Reference: [SKILLS/Email.md](./Email.md)
+
 - **`cron`** : schedule one-shot and recurring reminders via the `openclaw cron` CLI
   Reference: [SKILLS/Cron.md](./Cron.md)
 
-Of these, the `cron` skill is exposed natively in the command menu (`!cron`). The `email` skill is used like any other skill via OpenClaw core (`!skill <name>`).
+The `cron` skill is exposed natively in the command menu (`!cron`). Other skills are used via OpenClaw core (`!skill <name>`).
 
 > Copy the contents of the reference file into `~/.openclaw/workspace/skills/<skill-name>/SKILL.md` to use it as-is, or edit it to fit your setup.
 
