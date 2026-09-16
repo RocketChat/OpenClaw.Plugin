@@ -32,6 +32,14 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     },
   });
 
+  // Bypass bindings! Use explicit agentId from our own config if present.
+  const storedAgentId =
+    (params.cfg as any)?.channels?.rocketchat?.accounts?.[params.accountId]?.agentId ??
+    (params.cfg as any)?.channels?.rocketchat?.accounts?.[params.accountId]?.agent;
+  if (storedAgentId) {
+    route.agentId = storedAgentId;
+  }
+
   // Per-bot, per-sender session isolation: multiple bots bound to the same agent
   // get separate conversation histories by including the bot accountId in the key,
   // and each sender in a shared room gets its own history by including senderId.

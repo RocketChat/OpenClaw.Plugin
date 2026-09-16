@@ -14,6 +14,7 @@ import {
   ensureAgentForBot,
   isAgentBound,
   readAllAccounts,
+  seedBotWorkspace,
   updateConfig,
 } from "./config-updater.js";
 import { loadAdmin } from "./credentials.js";
@@ -309,6 +310,10 @@ export async function runSetup(): Promise<void> {
     ownerUsername = (await getUserInfo(rcUrl, adminAuth, { userId: adminAuth.userId }))?.username;
   } catch {
     // owner can be set later in openclaw.json
+  }
+
+  if (agentResult.agentId === dedicatedId) {
+    seedBotWorkspace(accountId, ownerUsername);
   }
 
   try {

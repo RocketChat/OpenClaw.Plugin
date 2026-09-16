@@ -36,6 +36,7 @@ const accountSchema = z
     transport: transportSchema,
     mentionNames: z.array(z.string().min(1)).default([]),
     agent: z.string().min(1).optional(),
+    agentId: z.string().min(1).optional(),
     owner: z.string().min(1).optional(),
   })
   .strict();

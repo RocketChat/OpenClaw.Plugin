@@ -11,14 +11,15 @@ import {
   readDefaultModel,
   setDefaultModel,
   readAllAccounts,
-  readBindingsForAccount,
   readOwner,
   readAccount,
   addAccount,
   ensureAgentForBot,
+  seedBotWorkspace,
   removeAccount,
   removeAgentDir,
   getAgentWorkspaceDir,
+  resolveAgentIdForAccount,
   type ExistingAccount,
   type TokenAuth,
 } from "../cli/config-updater.js";
@@ -422,17 +423,11 @@ function runBots(): string {
   const lines: string[] = [];
   for (const account of accounts) {
     const mention = account.mentionNames[0] ?? account.accountId;
-    const bindings = readBindingsForAccount(account.accountId);
+    const agentId = resolveAgentIdForAccount(account.accountId) ?? `rc-${account.accountId}`;
     const disabled = account.enabled === false ? " (disabled)" : "";
     const dead = connectionStatus.get(account.accountId) === "failed" ? " (dead)" : "";
-    if (bindings.length === 0) {
-      lines.push(`- ${mention}${disabled}${dead} - (no agent bound)`);
-      continue;
-    }
-    for (const binding of bindings) {
-      const agent = binding.agentId === `rc-${mention}` ? "" : ` → ${binding.agentId}`;
-      lines.push(`- ${mention}${disabled}${dead}${agent}`);
-    }
+    const agent = agentId === `rc-${mention}` ? "" : ` → ${agentId}`;
+    lines.push(`- ${mention}${disabled}${dead}${agent}`);
   }
 
   return ["**Bot accounts**", ...lines].join("\n");
@@ -676,8 +671,7 @@ async function runStatus(ctx: CommandContext): Promise<string> {
   const gateway =
     connectionStatus.get(ctx.account.accountId) ??
     (activeClients.has(ctx.account.accountId) ? "online" : "stopped");
-  const bindings = readBindingsForAccount(ctx.account.accountId);
-  const agent = bindings[0]?.agentId ?? "(unbound)";
+  const agent = resolveAgentIdForAccount(ctx.account.accountId) ?? "(unbound)";
   const runtime = ctx.channelRuntime ? "ready" : "unavailable";
   return [
     "**Status**",
@@ -754,6 +748,10 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
     });
 
     const owner = ctx.account.owner?.trim().replace(/^@+/, "") || undefined;
+
+    if (agent === `rc-${username}`) {
+      seedBotWorkspace(username, owner);
+    }
 
     let dmNote = "";
     if (owner) {
@@ -1078,8 +1076,7 @@ async function removeSingleBot(
     serverNote = `Could not delete Rocket.Chat user: ${e instanceof Error ? e.message : String(e)}`;
   }
 
-  const existingBindings = readBindingsForAccount(username);
-  const boundAgent = existingBindings[0]?.agentId;
+  const boundAgent = resolveAgentIdForAccount(username);
   const ownsDedicatedAgent = boundAgent === `rc-${username}`;
 
   const steps: string[] = [];

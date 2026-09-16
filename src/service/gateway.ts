@@ -11,7 +11,7 @@ import type {
   RocketChatMessageRecord,
 } from "../types.js";
 import { shouldHandleInboundEvent, matchCommand } from "./channel.js";
-import { migrateRcWorkspacesIfNeeded, readAccount } from "../cli/config-updater.js";
+import { readAccount } from "../cli/config-updater.js";
 import { collectBotUserIdsForServer, collectBotUsernamesForServer } from "../cli/config-updater.js";
 import { AccessStore } from "../config/access-store.js";
 import { appendGroupHistory, getAndClearGroupHistory } from "./group-history.js";
@@ -550,7 +550,6 @@ async function sendMessageChunks(
 }
 
 export async function startGateway(ctx: GatewayContext): Promise<void> {
-  migrateRcWorkspacesIfNeeded();
   const account = ctx.account ?? resolveAccount(ctx.cfg ?? {}, ctx.accountId);
   if (!account || !account.enabled) {
     ctx.setStatus?.("disabled");
