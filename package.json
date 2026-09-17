@@ -69,6 +69,7 @@
   },
   "dependencies": {
     "@clack/core": "1.4.3",
+    "@rocket.chat/ddp-client": "^1.1.1",
     "@clack/prompts": "^1.7.0",
     "@rocket.chat/ddp-client": "^1.1.1",
     "json5": "^2.2.3",
