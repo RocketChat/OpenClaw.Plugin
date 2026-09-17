@@ -16,6 +16,7 @@ import {
   readAllAccounts,
   seedBotWorkspace,
   updateConfig,
+  bindAgentToAccount,
 } from "./config-updater.js";
 import { loadAdmin } from "./credentials.js";
 import { resolveAdminAuth } from "./auth.js";
@@ -330,6 +331,9 @@ export async function runSetup(): Promise<void> {
         ...(ownerUsername ? { owner: ownerUsername } : {}),
         agentId: agentResult.agentId,
       });
+      if (agentResult.agentId) {
+        bindAgentToAccount(accountId, agentResult.agentId);
+      }
     });
     p.log.success(`Updated ${color.cyan(OC_CONFIG_PATH)}`);
     p.log.success(`Bound @${botUsername} to agent '${agentResult.agentId}'`);

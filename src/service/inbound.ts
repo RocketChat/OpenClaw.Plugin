@@ -32,24 +32,16 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     },
   });
 
-  // Bypass bindings! Use explicit agentId from our own config if present.
-  const storedAgentId =
-    (params.cfg as any)?.channels?.rocketchat?.accounts?.[params.accountId]?.agentId ??
-    (params.cfg as any)?.channels?.rocketchat?.accounts?.[params.accountId]?.agent;
-  if (storedAgentId) {
-    route.agentId = storedAgentId;
-  }
+  // Core 2026.9+ SQLite stores are bound to a registered agent id (usually "main").
+  // Account `agentId` (e.g. rc-oc) is only a plugin label — it is not in agents.entries.
+  // Passing it into resolveStorePath opens an rc-* store, then dispatch still requests
+  // "main" and Core throws: store path belongs to rc-oc; requested agent main.
+  const coreAgentId = route.agentId || "main";
 
-  // Per-bot, per-sender session isolation: multiple bots bound to the same agent
-  // get separate conversation histories by including the bot accountId in the key,
-  // and each sender in a shared room gets its own history by including senderId.
-  // accountId is the stable routing key (one bot = one agent), so this guarantees
-  // two bots sharing an agent (e.g. fallback to main) do not bleed memory into each other,
-  // and owner-only context (e.g. email/inbox data) does not leak into non-owner sessions.
   const botAwareSessionKey = `${route.sessionKey}:${params.accountId}:${params.event.senderId}`;
 
   const storePath = params.channelRuntime.session.resolveStorePath(params.cfg.session?.store, {
-    agentId: route.agentId,
+    agentId: coreAgentId,
   });
 
   const previousTimestamp = params.channelRuntime.session.readSessionUpdatedAt({
@@ -81,6 +73,7 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     From: buildSenderAddress(params.event),
     To: to,
     SessionKey: botAwareSessionKey,
+    AgentId: coreAgentId,
     AccountId: route.accountId ?? params.accountId,
     ChatType: params.event.roomType,
     ConversationLabel: buildConversationLabel(params.event),

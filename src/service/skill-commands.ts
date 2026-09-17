@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { CommandContext } from "./channel.js";
+import { resolveAgentIdForAccount } from "../cli/config-updater.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -163,7 +164,8 @@ function parseCronJobsResponse(stdout: string): Array<Record<string, unknown>> {
 
 async function cronList(ctx: CommandContext): Promise<string> {
   try {
-    const res = await runOpenClaw(["cron", "list", "--agent", `rc-${ctx.accountId}`, "--json"]);
+    const agentId = resolveAgentIdForAccount(ctx.accountId) ?? `rc-${ctx.accountId}`;
+    const res = await runOpenClaw(["cron", "list", "--agent", agentId, "--json"]);
     const jobs = parseCronJobsResponse(res.stdout);
     if (jobs.length === 0) {
       return "No cron jobs for this bot.";
@@ -198,7 +200,8 @@ async function cronList(ctx: CommandContext): Promise<string> {
 
 async function cronStop(ctx: CommandContext, name: string): Promise<string> {
   try {
-    const listRes = await runOpenClaw(["cron", "list", "--agent", `rc-${ctx.accountId}`, "--json"]);
+    const agentId = resolveAgentIdForAccount(ctx.accountId) ?? `rc-${ctx.accountId}`;
+    const listRes = await runOpenClaw(["cron", "list", "--agent", agentId, "--json"]);
     const jobs = parseCronJobsResponse(listRes.stdout);
     const target = jobs.find((j) => {
       const jobName = String(j.name ?? j.id ?? "");
@@ -239,7 +242,7 @@ export async function runCronCommand(ctx: CommandContext, argStr: string): Promi
   const { every, intervalInput, interval, task } = parsed;
 
   const accountId = ctx.accountId;
-  const agentId = `rc-${accountId}`;
+  const agentId = resolveAgentIdForAccount(accountId) ?? `rc-${accountId}`;
   const roomId = ctx.roomId;
   const name = deriveName(task);
 

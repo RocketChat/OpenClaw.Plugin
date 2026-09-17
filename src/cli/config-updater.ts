@@ -1,11 +1,4 @@
-import {
-  existsSync,
-  readFileSync,
-  writeFileSync,
-  renameSync,
-  rmSync,
-  mkdirSync,
-} from "node:fs";
+import { existsSync, readFileSync, writeFileSync, renameSync, rmSync, mkdirSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
@@ -124,8 +117,7 @@ export function readAccount(accountId = "main"): ExistingAccount | null {
       : typeof account.agent === "string"
         ? account.agent
         : undefined;
-  const agentId =
-    typeof agentIdRaw === "string" && agentIdRaw.length > 0 ? agentIdRaw : undefined;
+  const agentId = typeof agentIdRaw === "string" && agentIdRaw.length > 0 ? agentIdRaw : undefined;
   const enabled = account.enabled !== false;
   return {
     accountId,
@@ -245,6 +237,10 @@ export function updateConfig(opts: {
     ...(opts.agentId ? { agentId: opts.agentId } : {}),
   };
 
+  if (opts.agentId) {
+    applyAgentBinding(cfg, opts.accountId, opts.agentId);
+  }
+
   writeConfig(cfg);
 }
 
@@ -351,21 +347,25 @@ export function resolveAgentIdForAccount(accountId: string): string | undefined 
 }
 
 export function seedBotWorkspace(accountId: string, owner?: string): void {
-  const dir = getAgentWorkspaceDir(`rc-${accountId}`);
-  mkdirSync(dir, { recursive: true });
+  const sharedDir = getAgentWorkspaceDir(`rc-${accountId}`);
+  const localDir = resolve(homedir(), ".openclaw", "agents", `rc-${accountId}`, "workspace");
 
-  const bootstrapFile = resolve(dir, "BOOTSTRAP.md");
-  if (!existsSync(bootstrapFile)) {
-    writeFileSync(
-      bootstrapFile,
-      "# BOOTSTRAP.md\n\nOnboarding is complete. Do not ask the user to set up identity or workspace files.\n",
-    );
-  }
+  for (const dir of [sharedDir, localDir]) {
+    mkdirSync(dir, { recursive: true });
 
-  const userFile = resolve(dir, "USER.md");
-  if (!existsSync(userFile)) {
-    const ownerLine = owner ? `- **Owner:** ${owner}\n` : "";
-    writeFileSync(userFile, `# USER.md\n\n${ownerLine}- **Bot:** ${accountId}\n`);
+    const bootstrapFile = resolve(dir, "BOOTSTRAP.md");
+    if (!existsSync(bootstrapFile)) {
+      writeFileSync(
+        bootstrapFile,
+        "# BOOTSTRAP.md\n\nOnboarding is complete. Do not ask the user to set up identity or workspace files.\n",
+      );
+    }
+
+    const userFile = resolve(dir, "USER.md");
+    if (!existsSync(userFile)) {
+      const ownerLine = owner ? `- **Owner:** ${owner}\n` : "";
+      writeFileSync(userFile, `# USER.md\n\n${ownerLine}- **Bot:** ${accountId}\n`);
+    }
   }
 }
 
@@ -377,6 +377,19 @@ export function ensureAgentForBot(accountId: string): {
 } {
   const dedicatedId = `rc-${accountId}`;
   const existed = readAgentsList().some((a) => a.id === dedicatedId);
+
+  if (!existed) {
+    const agentDir = resolve(homedir(), ".openclaw", "agents", dedicatedId);
+    mkdirSync(agentDir, { recursive: true });
+    const agentFile = resolve(agentDir, "agent.md");
+    if (!existsSync(agentFile)) {
+      writeFileSync(
+        agentFile,
+        `# ${dedicatedId}\n\nYou are a helpful AI assistant for Rocket.Chat.\n`,
+      );
+    }
+  }
+
   return { agentId: dedicatedId, created: !existed, fallback: false };
 }
 
@@ -409,14 +422,36 @@ function normalizeAgentId(id: string): string {
   return id.trim().toLowerCase();
 }
 
-
-
 export function removeAccount(accountId: string): void {
   const cfg = readConfig() as Record<string, any>;
+  const agentId = `rc-${accountId.toLowerCase()}`;
+
+  // 1. Remove account entry
   const accounts = cfg?.channels?.rocketchat?.accounts as Record<string, any> | undefined;
   if (accounts) {
     delete accounts[accountId];
   }
+
+  // 2. Remove associated bindings
+  if (Array.isArray(cfg?.bindings)) {
+    cfg.bindings = cfg.bindings.filter(
+      (b: any) =>
+        !(
+          b?.match?.channel === "rocketchat" &&
+          b?.match?.accountId?.toLowerCase() === accountId.toLowerCase()
+        ),
+    );
+  }
+
+  // 3. Remove agent from agents.entries if not bound to any remaining binding
+  if (cfg?.agents?.entries && cfg.agents.entries[agentId]) {
+    const isBoundElsewhere =
+      Array.isArray(cfg.bindings) && cfg.bindings.some((b: any) => b?.agentId === agentId);
+    if (!isBoundElsewhere) {
+      delete cfg.agents.entries[agentId];
+    }
+  }
+
   writeConfig(cfg);
 }
 
@@ -452,4 +487,54 @@ function removeWorkspaceAttestations(workspaceDir: string): void {
   }
   const legacy = `${resolve(workspaceDir)}.attested`;
   if (existsSync(legacy)) rmSync(legacy, { force: true });
+}
+
+export function applyAgentBinding(
+  cfg: Record<string, any>,
+  accountId: string,
+  agentId: string,
+): boolean {
+  let changed = false;
+
+  // 1. Ensure the agent is explicitly declared in agents.entries
+  if (!cfg.agents) cfg.agents = {};
+  if (!cfg.agents.entries) cfg.agents.entries = {};
+  if (!cfg.agents.entries[agentId]) {
+    cfg.agents.entries[agentId] = {
+      name: agentId,
+    };
+    changed = true;
+  }
+
+  // 2. Ensure the binding exists
+  if (!Array.isArray(cfg.bindings)) {
+    cfg.bindings = [];
+  }
+  const bindingExists = cfg.bindings.some(
+    (b: any) =>
+      b.match?.channel === "rocketchat" &&
+      b.match?.accountId === accountId &&
+      b.agentId === agentId,
+  );
+
+  if (!bindingExists) {
+    cfg.bindings.push({
+      agentId,
+      match: {
+        channel: "rocketchat",
+        accountId,
+      },
+    });
+    changed = true;
+  }
+
+  return changed;
+}
+
+export function bindAgentToAccount(accountId: string, agentId: string): void {
+  const cfg = readConfig() as Record<string, any>;
+  const changed = applyAgentBinding(cfg, accountId, agentId);
+  if (changed) {
+    writeConfig(cfg);
+  }
 }

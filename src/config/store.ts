@@ -86,12 +86,12 @@ export class CheckpointStore {
         "INSERT OR REPLACE INTO failed_messages (message_id, room_id, sender_name, sent_at, failed_at, reason) VALUES (?, ?, ?, ?, ?, ?)",
       )
       .run(
-        failure.messageId,
-        failure.roomId,
-        failure.senderName,
-        failure.sentAt,
-        failure.failedAt,
-        failure.reason,
+        String(failure.messageId ?? ""),
+        String(failure.roomId ?? ""),
+        String(failure.senderName ?? ""),
+        String(failure.sentAt ?? ""),
+        String(failure.failedAt ?? ""),
+        String(failure.reason ?? ""),
       );
     this.db
       .prepare(

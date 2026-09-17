@@ -799,14 +799,20 @@ async function startDdpGateway(
           logger.error(
             `[rocketchat:${accountId}] failed to handle message ${event.messageId}: ${reason}`,
           );
-          await checkpoint.recordFailure({
-            messageId: event.messageId,
-            roomId: event.roomId,
-            senderName: event.senderName,
-            sentAt: event.sentAt,
-            failedAt: new Date().toISOString(),
-            reason,
-          });
+          try {
+            await checkpoint.recordFailure({
+              messageId: event.messageId ?? "",
+              roomId: event.roomId ?? "",
+              senderName: event.senderName ?? "",
+              sentAt: event.sentAt ?? "",
+              failedAt: new Date().toISOString(),
+              reason,
+            });
+          } catch (recordErr) {
+            logger.error(
+              `[rocketchat:${accountId}] failed to persist message failure: ${recordErr instanceof Error ? recordErr.message : String(recordErr)}`,
+            );
+          }
         })
         .finally(() => {
           processingMessages.delete(msg._id);

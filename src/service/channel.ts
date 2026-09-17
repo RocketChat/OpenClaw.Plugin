@@ -20,6 +20,7 @@ import {
   removeAgentDir,
   getAgentWorkspaceDir,
   resolveAgentIdForAccount,
+  bindAgentToAccount,
   type ExistingAccount,
   type TokenAuth,
 } from "../cli/config-updater.js";
@@ -426,7 +427,7 @@ function runBots(): string {
     const agentId = resolveAgentIdForAccount(account.accountId) ?? `rc-${account.accountId}`;
     const disabled = account.enabled === false ? " (disabled)" : "";
     const dead = connectionStatus.get(account.accountId) === "failed" ? " (dead)" : "";
-    const agent = agentId === `rc-${mention}` ? "" : ` → ${agentId}`;
+    const agent = ` → ${agentId}`;
     lines.push(`- ${mention}${disabled}${dead}${agent}`);
   }
 
@@ -434,27 +435,23 @@ function runBots(): string {
 }
 
 function runSkills(ctx?: CommandContext): string {
-  const scannedDirs: Array<{ path: string; scope: "Private" | "Global" }> = [];
+  const scannedDirs: Array<{ path: string; scopeLabel: string }> = [];
 
   if (ctx?.accountId) {
-    const agentId = `rc-${ctx.accountId}`;
+    const agentId = resolveAgentIdForAccount(ctx.accountId) ?? `rc-${ctx.accountId}`;
     const agentWs = getAgentWorkspaceDir(agentId);
-    scannedDirs.push({ path: join(agentWs, "skills"), scope: "Private" });
+    scannedDirs.push({ path: join(agentWs, "skills"), scopeLabel: `Agent: ${agentId}` });
     scannedDirs.push({
       path: resolve(resolveOpenClawDir(), "agents", agentId, "skills"),
-      scope: "Private",
+      scopeLabel: `Agent: ${agentId}`,
     });
   }
 
-  scannedDirs.push({ path: join(resolveOpenClawDir(), "workspace", "skills"), scope: "Global" });
-  scannedDirs.push({ path: join(resolveOpenClawDir(), "skills"), scope: "Global" });
+  scannedDirs.push({ path: join(resolveOpenClawDir(), "skills"), scopeLabel: "Global" });
 
-  const skillsMap = new Map<
-    string,
-    { name: string; description: string; scope: "Private" | "Global" }
-  >();
+  const skillsMap = new Map<string, { name: string; description: string; scopeLabel: string }>();
 
-  for (const { path: skillsDir, scope } of scannedDirs) {
+  for (const { path: skillsDir, scopeLabel } of scannedDirs) {
     if (!existsSync(skillsDir)) continue;
     const entries = readdirSync(skillsDir).filter((name) => {
       const full = resolve(skillsDir, name);
@@ -478,7 +475,7 @@ function runSkills(ctx?: CommandContext): string {
       if (!fm.name) continue;
       const key = fm.name.toLowerCase();
       if (!skillsMap.has(key)) {
-        skillsMap.set(key, { name: fm.name, description: fm.description ?? "", scope });
+        skillsMap.set(key, { name: fm.name, description: fm.description ?? "", scopeLabel });
       }
     }
   }
@@ -492,7 +489,7 @@ function runSkills(ctx?: CommandContext): string {
   lines.push("Use a skill via inbound chat with the agent.");
   for (const s of skills) {
     const title = s.name.charAt(0).toUpperCase() + s.name.slice(1);
-    const scopeTag = `\`[${s.scope}]\``;
+    const scopeTag = `\`[${s.scopeLabel}]\``;
     lines.push("", `**${title}** ${scopeTag}`);
     lines.push(`• ${s.description ? cap(s.description) : "No description available."}`);
   }
@@ -768,6 +765,10 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
       } catch (e: unknown) {
         dmNote = `Could not DM ${owner}: ${e instanceof Error ? e.message : String(e)}`;
       }
+    }
+
+    if (agent) {
+      bindAgentToAccount(accountId, agent);
     }
 
     void startBotAccount(ctx, {
