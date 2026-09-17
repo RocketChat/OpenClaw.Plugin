@@ -30,6 +30,10 @@ jobs:
 
       - run: pnpm run test
         name: Run tests
+        env:
+          ROCKETCHAT_URL: ${{ secrets.ROCKETCHAT_URL }}
+          ROCKETCHAT_USER_ID: ${{ secrets.ROCKETCHAT_USER_ID }}
+          ROCKETCHAT_TOKEN: ${{ secrets.ROCKETCHAT_TOKEN }}
 
       - run: pnpm dlx clawhub package publish . --dry-run --json --owner @dodaa08
         name: Validate ClawHub publish

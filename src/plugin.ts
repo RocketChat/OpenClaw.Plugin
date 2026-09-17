@@ -14,7 +14,7 @@ import {
 import { collectBotUsernamesForServer } from "./cli/config-updater.js";
 import type { ResolvedAccount } from "./types.js";
 
-export { startGateway, resolveAccount, listAccountIds, isConfigured };
+export { startGateway, isConfigured };
 
 export const rocketchatPlugin = createChatChannelPlugin<ResolvedAccount>({
   base: {

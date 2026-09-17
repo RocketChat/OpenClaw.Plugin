@@ -14,7 +14,7 @@ export type AccessGrant = {
 
 const SCHEMA_VERSION = "1";
 
-export function getAccessDbPath(): string {
+function getAccessDbPath(): string {
   return resolve(homedir(), ".openclaw", "rocketchat", "access.db");
 }
 

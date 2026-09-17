@@ -5,26 +5,29 @@ import { RocketChatClient } from "../client/rest.js";
 import type { RCLoginResult } from "../types.js";
 import { readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { resolve, join } from "node:path";
+import { parse as parseYaml } from "yaml";
 import {
   readConfig,
   readDefaultModel,
   setDefaultModel,
   readAllAccounts,
-  readBindingsForAccount,
   readOwner,
   readAccount,
   addAccount,
-  addBinding,
   ensureAgentForBot,
-  removeBindingsForAccount,
+  seedBotWorkspace,
   removeAccount,
   removeAgentDir,
+  getAgentWorkspaceDir,
+  resolveAgentIdForAccount,
+  bindAgentToAccount,
   type ExistingAccount,
   type TokenAuth,
 } from "../cli/config-updater.js";
 import {
   createBotUser,
   loginAs,
+  isTimeoutError,
   getGroupByName,
   createDirectMessage,
   sendMessage,
@@ -39,17 +42,7 @@ import { loadAdmin, removeBotCredentials } from "../cli/credentials.js";
 import { startGateway } from "./gateway.js";
 import { activeClients, connectionStatus } from "./runtime-state.js";
 import { AccessStore } from "../config/access-store.js";
-import {
-  runCronCommand,
-  runEmailCommand,
-  runConfigureCommand,
-  CRON_USAGE,
-  CRON_HEADING,
-  EMAIL_USAGE,
-  EMAIL_HEADING,
-  CONFIGURE_USAGE,
-  CONFIGURE_HEADING,
-} from "./skill-commands.js";
+import { runCronCommand } from "./skill-commands.js";
 
 const BROADCAST_MENTIONS = new Set(["here", "all", "everyone"]);
 
@@ -152,8 +145,6 @@ const OWNER_ONLY_COMMANDS = new Set([
   "revoke",
   "access",
   "bots",
-  "email",
-  "configure",
 ]);
 
 function isOwner(ctx: CommandContext): boolean {
@@ -217,37 +208,10 @@ async function runCommand(
       return await runModel(argStr);
     case "tools":
       return { action: "openclaw-command", command: `/tools${argStr ? " " + argStr : ""}` };
-    case "skill": {
-      const skillName = argStr.trim().split(/\s+/)[0] ?? "";
-      const owner = isOwner(ctx);
-      if (skillName.toLowerCase() === "cron") {
-        return { action: "reply", replyText: [CRON_HEADING, CRON_USAGE].join("\n") };
-      }
-      if (
-        (skillName.toLowerCase() === "email" || skillName.toLowerCase() === "configure") &&
-        !owner
-      ) {
-        return {
-          action: "reply",
-          replyText: `\`!skill ${skillName}\` is owner-only. Contact ${ctx.account.owner ? `@${ctx.account.owner}` : "the bot owner"}.`,
-        };
-      }
-      if (skillName.toLowerCase() === "email") {
-        return { action: "reply", replyText: [EMAIL_HEADING, EMAIL_USAGE].join("\n") };
-      }
-      if (skillName.toLowerCase() === "configure") {
-        return { action: "reply", replyText: [CONFIGURE_HEADING, CONFIGURE_USAGE].join("\n") };
-      }
-      return { action: "openclaw-command", command: `/skill${argStr ? " " + argStr : ""}` };
-    }
     case "skills":
-      return { action: "reply", replyText: runSkills(isOwner(ctx)) };
+      return { action: "reply", replyText: runSkills(ctx) };
     case "cron":
       return { action: "reply", replyText: await runCronCommand(ctx, argStr) };
-    case "email":
-      return { action: "reply", replyText: await runEmailCommand(ctx, argStr) };
-    case "configure":
-      return { action: "reply", replyText: runConfigureCommand() };
     case "think":
       return { action: "openclaw-command", command: `/think${argStr ? " " + argStr : ""}` };
     case "abort":
@@ -311,11 +275,10 @@ function buildHelpText(showAll: boolean): string {
       ],
     ],
     [
-      "Tools & Skills",
+      "Cron & Skills",
       [
-        ["tools", "list agent tools"],
-        ["skills", "installed skills"],
-        ["skill <name>", "run a skill"],
+        ["cron <interval> <task>", "one-shot reminder; run `!cron` for full usage"],
+        ["skills", "list installed skills (use via inbound chat)"],
       ],
     ],
   ];
@@ -461,83 +424,91 @@ function runBots(): string {
   const lines: string[] = [];
   for (const account of accounts) {
     const mention = account.mentionNames[0] ?? account.accountId;
-    const bindings = readBindingsForAccount(account.accountId);
+    const agentId = resolveAgentIdForAccount(account.accountId) ?? `rc-${account.accountId}`;
     const disabled = account.enabled === false ? " (disabled)" : "";
     const dead = connectionStatus.get(account.accountId) === "failed" ? " (dead)" : "";
-    if (bindings.length === 0) {
-      lines.push(`- ${mention}${disabled}${dead} - (no agent bound)`);
-      continue;
-    }
-    for (const binding of bindings) {
-      const agent = binding.agentId === `rc-${mention}` ? "" : ` → ${binding.agentId}`;
-      lines.push(`- ${mention}${disabled}${dead}${agent}`);
-    }
+    const agent = ` → ${agentId}`;
+    lines.push(`- ${mention}${disabled}${dead}${agent}`);
   }
 
   return ["**Bot accounts**", ...lines].join("\n");
 }
 
-function parseSkillFrontmatter(content: string): { name?: string; description?: string } {
-  const fmMatch = content.match(/^---\s*\n([\s\S]*?)\n---/);
-  if (!fmMatch) return {};
-  const fm = fmMatch[1]!;
-  const result: { name?: string; description?: string } = {};
-  const nameLine = fm.match(/^name:\s*(.+)$/m);
-  if (nameLine) result.name = nameLine[1]!.trim().replace(/^["']|["']$/g, "");
-  const descLine = fm.match(/^description:\s*(.+)$/m);
-  if (descLine) result.description = descLine[1]!.trim().replace(/^["']|["']$/g, "");
-  return result;
-}
+function runSkills(ctx?: CommandContext): string {
+  const scannedDirs: Array<{ path: string; scopeLabel: string }> = [];
 
-function runSkills(showOwnerOnly: boolean): string {
-  const skillsDir = join(resolveOpenClawDir(), "workspace", "skills");
-  if (!existsSync(skillsDir)) {
-    return "No skills installed (expected at ~/.openclaw/workspace/skills).";
+  if (ctx?.accountId) {
+    const agentId = resolveAgentIdForAccount(ctx.accountId) ?? `rc-${ctx.accountId}`;
+    const agentWs = getAgentWorkspaceDir(agentId);
+    scannedDirs.push({ path: join(agentWs, "skills"), scopeLabel: `Agent: ${agentId}` });
+    scannedDirs.push({
+      path: resolve(resolveOpenClawDir(), "agents", agentId, "skills"),
+      scopeLabel: `Agent: ${agentId}`,
+    });
   }
-  const entries = readdirSync(skillsDir).filter((name) => {
-    const full = resolve(skillsDir, name);
-    try {
-      return statSync(full).isDirectory() || statSync(full).isSymbolicLink();
-    } catch {
-      return false;
+
+  scannedDirs.push({ path: join(resolveOpenClawDir(), "skills"), scopeLabel: "Global" });
+
+  const skillsMap = new Map<string, { name: string; description: string; scopeLabel: string }>();
+
+  for (const { path: skillsDir, scopeLabel } of scannedDirs) {
+    if (!existsSync(skillsDir)) continue;
+    const entries = readdirSync(skillsDir).filter((name) => {
+      const full = resolve(skillsDir, name);
+      try {
+        return statSync(full).isDirectory() || statSync(full).isSymbolicLink();
+      } catch {
+        return false;
+      }
+    });
+
+    for (const name of entries) {
+      const skillMd = resolve(skillsDir, name, "SKILL.md");
+      if (!existsSync(skillMd)) continue;
+      let content = "";
+      try {
+        content = readFileSync(skillMd, "utf8");
+      } catch {
+        continue;
+      }
+      const fm = parseSkillFrontmatter(content);
+      if (!fm.name) continue;
+      const key = fm.name.toLowerCase();
+      if (!skillsMap.has(key)) {
+        skillsMap.set(key, { name: fm.name, description: fm.description ?? "", scopeLabel });
+      }
     }
-  });
-  const skills: Array<{ name: string; description: string }> = [];
-  for (const name of entries) {
-    const skillMd = resolve(skillsDir, name, "SKILL.md");
-    if (!existsSync(skillMd)) continue;
-    let content = "";
-    try {
-      content = readFileSync(skillMd, "utf8");
-    } catch {
-      continue;
-    }
-    const fm = parseSkillFrontmatter(content);
-    if (!fm.name) continue;
-    skills.push({ name: fm.name, description: fm.description ?? "" });
   }
+
+  const skills = Array.from(skillsMap.values());
   if (skills.length === 0) {
-    return "No skills installed (expected at ~/.openclaw/workspace/skills).";
+    return "No skills installed.";
   }
-  const cap = (s: string, n = 80): string => (s.length > n ? s.slice(0, n).trimEnd() + "…" : s);
-  const lines = ["**Skills**"];
-  const has = (name: string): boolean => skills.some((s) => s.name === name);
-  lines.push("", CRON_HEADING, CRON_USAGE);
-  if (showOwnerOnly) {
-    if (has("email") || has("agentmail")) {
-      lines.push("", EMAIL_HEADING, EMAIL_USAGE);
-    }
-    lines.push("", CONFIGURE_HEADING, CONFIGURE_USAGE);
-  }
+  const cap = (s: string, n = 200): string => (s.length > n ? s.slice(0, n).trimEnd() + "…" : s);
+  const lines = ["**Installed skills**", ""];
+  lines.push("Use a skill via inbound chat with the agent.");
   for (const s of skills) {
-    if (s.name === "cron" || s.name === "email" || s.name === "agentmail") continue;
-    if (!showOwnerOnly && s.name === "configure") continue;
     const title = s.name.charAt(0).toUpperCase() + s.name.slice(1);
-    lines.push("", `**${title}**`);
+    const scopeTag = `\`[${s.scopeLabel}]\``;
+    lines.push("", `**${title}** ${scopeTag}`);
     lines.push(`• ${s.description ? cap(s.description) : "No description available."}`);
-    lines.push(`• Run with: \`!skill ${s.name}\``);
   }
   return lines.join("\n");
+}
+
+function parseSkillFrontmatter(content: string): { name?: string; description?: string } {
+  const lines = content.split("\n");
+  const openIdx = lines[0]?.trim() === "---" ? 0 : -1;
+  if (openIdx === -1) return {};
+  const closeIdx = lines.findIndex((l, i) => i > openIdx && l.trim() === "---");
+  if (closeIdx === -1) return {};
+  const data = parseYaml(lines.slice(openIdx + 1, closeIdx).join("\n")) as
+    { name?: unknown; description?: unknown } | null | undefined;
+  if (typeof data !== "object" || data === null) return {};
+  return {
+    ...(typeof data.name === "string" ? { name: data.name } : {}),
+    ...(typeof data.description === "string" ? { description: data.description } : {}),
+  };
 }
 
 async function runGroups(ctx: CommandContext): Promise<string> {
@@ -697,8 +668,7 @@ async function runStatus(ctx: CommandContext): Promise<string> {
   const gateway =
     connectionStatus.get(ctx.account.accountId) ??
     (activeClients.has(ctx.account.accountId) ? "online" : "stopped");
-  const bindings = readBindingsForAccount(ctx.account.accountId);
-  const agent = bindings[0]?.agentId ?? "(unbound)";
+  const agent = resolveAgentIdForAccount(ctx.account.accountId) ?? "(unbound)";
   const runtime = ctx.channelRuntime ? "ready" : "unavailable";
   return [
     "**Status**",
@@ -739,7 +709,7 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
   }
 
   try {
-    const limitCheck = checkBotCreationLimit("inline", {
+    const limitCheck = checkBotCreationLimit({
       serverUrl: ctx.account.serverUrl,
       maxAccounts: ctx.limits?.maxAccounts,
       maxBotsPerServer: ctx.limits?.maxBotsPerServer,
@@ -771,10 +741,14 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
       auth: { mode: "token", userId: botAuth.userId, accessToken: botAuth.authToken } as TokenAuth,
       mentionNames: [username],
       ...(ctx.account.owner ? { owner: ctx.account.owner } : {}),
+      agentId: agent,
     });
-    addBinding({ channel: "rocketchat", accountId, agentId: agent });
 
     const owner = ctx.account.owner?.trim().replace(/^@+/, "") || undefined;
+
+    if (agent === `rc-${username}`) {
+      seedBotWorkspace(username, owner);
+    }
 
     let dmNote = "";
     if (owner) {
@@ -793,6 +767,10 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
       }
     }
 
+    if (agent) {
+      bindAgentToAccount(accountId, agent);
+    }
+
     void startBotAccount(ctx, {
       accountId,
       serverUrl: ctx.account.serverUrl,
@@ -808,6 +786,13 @@ async function runAddBot(ctx: CommandContext, argStr: string): Promise<string> {
       ...(dmNote ? [dmNote] : []),
     ].join("\n");
   } catch (e: unknown) {
+    if (isTimeoutError(e)) {
+      return (
+        `Failed to create bot: the Rocket.Chat server did not respond in time. ` +
+        `It may have been created anyway - check the user \`${username}\` on the server, ` +
+        `or use \`!remove-bot ${username}\` before retrying.`
+      );
+    }
     return `Failed to create bot: ${e instanceof Error ? e.message : String(e)}`;
   }
 }
@@ -859,7 +844,6 @@ async function notifyAccessChange(
   roomId: string,
   scopeLabel: string,
   action: "granted" | "revoked",
-  targetIsBot: boolean,
 ): Promise<string | undefined> {
   const botMention = ctx.account.mentionNames[0] ?? ctx.accountId;
   const how =
@@ -935,14 +919,7 @@ async function runLend(ctx: CommandContext, argStr: string): Promise<string> {
 
     const scope = roomId === DM_SCOPE ? "direct messages" : `#${roomName}`;
     if (ok) {
-      const notice = await notifyAccessChange(
-        ctx,
-        cleanUser,
-        roomId,
-        scope,
-        "granted",
-        !!targetUser.roles?.includes("bot"),
-      );
+      const notice = await notifyAccessChange(ctx, cleanUser, roomId, scope, "granted");
       return `Granted ${cleanUser} access to ${ctx.account.mentionNames[0] ?? ctx.accountId} in ${scope}.${notice ?? ""}`;
     }
     return `That grant already exists.`;
@@ -1021,14 +998,7 @@ async function runRevoke(ctx: CommandContext, argStr: string): Promise<string> {
 
     const scope = roomId === DM_SCOPE ? "direct messages" : `#${roomName}`;
     if (ok) {
-      const notice = await notifyAccessChange(
-        ctx,
-        cleanUser,
-        roomId,
-        scope,
-        "revoked",
-        !!targetUser.roles?.includes("bot"),
-      );
+      const notice = await notifyAccessChange(ctx, cleanUser, roomId, scope, "revoked");
       return `Revoked ${cleanUser}'s access to ${ctx.account.mentionNames[0] ?? ctx.accountId} in ${scope}.${notice ?? ""}`;
     }
     return `No such grant found. ${cleanUser} did not have access in ${scope}.`;
@@ -1107,22 +1077,14 @@ async function removeSingleBot(
     serverNote = `Could not delete Rocket.Chat user: ${e instanceof Error ? e.message : String(e)}`;
   }
 
-  const existingBindings = readBindingsForAccount(username);
-  const boundAgent = existingBindings[0]?.agentId;
+  const boundAgent = resolveAgentIdForAccount(username);
   const ownsDedicatedAgent = boundAgent === `rc-${username}`;
 
   const steps: string[] = [];
 
   try {
-    removeBindingsForAccount(username);
-    steps.push("OpenClaw binding removed");
-  } catch (e: unknown) {
-    steps.push(`binding cleanup failed: ${e instanceof Error ? e.message : String(e)}`);
-  }
-
-  try {
     removeAccount(username);
-    steps.push("OpenClaw account removed");
+    steps.push("OpenClaw account and binding removed");
   } catch (e: unknown) {
     steps.push(`account cleanup failed: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -1142,7 +1104,7 @@ async function removeSingleBot(
   if (ownsDedicatedAgent) {
     try {
       removeAgentDir(username);
-      steps.push(`workspace \`rc-${username}\` removed`);
+      steps.push(`agent \`rc-${username}\` removed`);
     } catch (e: unknown) {
       steps.push(`workspace cleanup failed: ${e instanceof Error ? e.message : String(e)}`);
     }

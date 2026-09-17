@@ -29,8 +29,8 @@ import type {
 const MAX_MESSAGE_LENGTH = 4000;
 const MAX_ATTACHMENTS = 5;
 
-import { activeClients, connectionStatus, type ClientEntry } from "./runtime-state.js";
-export { activeClients, type ClientEntry } from "./runtime-state.js";
+import { activeClients, connectionStatus } from "./runtime-state.js";
+export { activeClients } from "./runtime-state.js";
 let nextGeneration = 0;
 
 const threadRoots = new Map<string, string>();
@@ -425,7 +425,7 @@ function stripEmojis(text: string): string {
 
 const SEND_RETRY_DELAY_MS = 500;
 
-export async function postMessageWithRetry(
+async function postMessageWithRetry(
   client: Pick<RocketChatClient, "postMessage">,
   accountId: string,
   roomId: string,
@@ -445,7 +445,7 @@ export async function postMessageWithRetry(
   }
 }
 
-export function resolveReplyTmid(params: {
+function resolveReplyTmid(params: {
   roomType: string;
   tmid?: string | undefined;
   messageId: string;
@@ -799,14 +799,20 @@ async function startDdpGateway(
           logger.error(
             `[rocketchat:${accountId}] failed to handle message ${event.messageId}: ${reason}`,
           );
-          await checkpoint.recordFailure({
-            messageId: event.messageId,
-            roomId: event.roomId,
-            senderName: event.senderName,
-            sentAt: event.sentAt,
-            failedAt: new Date().toISOString(),
-            reason,
-          });
+          try {
+            await checkpoint.recordFailure({
+              messageId: event.messageId ?? "",
+              roomId: event.roomId ?? "",
+              senderName: event.senderName ?? "",
+              sentAt: event.sentAt ?? "",
+              failedAt: new Date().toISOString(),
+              reason,
+            });
+          } catch (recordErr) {
+            logger.error(
+              `[rocketchat:${accountId}] failed to persist message failure: ${recordErr instanceof Error ? recordErr.message : String(recordErr)}`,
+            );
+          }
         })
         .finally(() => {
           processingMessages.delete(msg._id);

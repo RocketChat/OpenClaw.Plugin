@@ -8,54 +8,7 @@ import type {
 } from "../types.js";
 import type { RocketChatClient } from "../client/rest.js";
 import type { GroupHistoryEntry } from "./group-history.js";
-import { parsePluginConfig } from "../config/schema.js";
-
-const DEFAULT_OWNER_ONLY_SKILLS = ["email"];
-
-function readAccountPolicy(
-  cfg: OpenClawConfigLike,
-  accountId: string,
-): { owner: string | undefined; ownerOnlySkills: string[] } {
-  try {
-    const nested = cfg.channels?.rocketchat;
-    const parsed = nested
-      ? parsePluginConfig(nested as never)
-      : cfg && typeof cfg === "object" && "accounts" in cfg
-        ? parsePluginConfig(cfg as never)
-        : { accounts: {} };
-    const account = parsed.accounts[accountId];
-    return {
-      owner: account?.owner,
-      ownerOnlySkills:
-        account?.ownerOnlySkills && account.ownerOnlySkills.length > 0
-          ? account.ownerOnlySkills
-          : DEFAULT_OWNER_ONLY_SKILLS,
-    };
-  } catch {
-    return { owner: undefined, ownerOnlySkills: [] };
-  }
-}
-
-function normalizeName(name: string): string {
-  return name.trim().replace(/^@+/, "").toLowerCase();
-}
-
-function buildOwnerOnlyGuardrail(
-  senderName: string,
-  owner: string | undefined,
-  ownerOnlySkills: string[],
-): string {
-  if (!owner || ownerOnlySkills.length === 0) return "";
-  if (normalizeName(senderName) === normalizeName(owner)) return "";
-  return [
-    ``,
-    `[SECURITY POLICY]`,
-    `The sender (@${senderName}) is NOT the bot owner (@${owner}).`,
-    `You MUST refuse any request that uses the following owner-only skills: ${ownerOnlySkills.join(", ")}.`,
-    `If the user asks for any of these, politely decline and explain that only @${owner} can do it.`,
-    `[/SECURITY POLICY]`,
-  ].join("\n");
-}
+import { dirname } from "node:path";
 
 export async function dispatchInboundEventWithChannelRuntime(params: {
   cfg: OpenClawConfigLike;
@@ -79,16 +32,16 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     },
   });
 
-  // Per-bot, per-sender session isolation: multiple bots bound to the same agent
-  // get separate conversation histories by including the bot accountId in the key,
-  // and each sender in a shared room gets its own history by including senderId.
-  // accountId is the stable routing key (one bot = one agent), so this guarantees
-  // two bots sharing an agent (e.g. fallback to main) do not bleed memory into each other,
-  // and owner-only context (e.g. email/inbox data) does not leak into non-owner sessions.
+  // Core 2026.9+ SQLite stores are bound to a registered agent id (usually "main").
+  // Account `agentId` (e.g. rc-oc) is only a plugin label — it is not in agents.entries.
+  // Passing it into resolveStorePath opens an rc-* store, then dispatch still requests
+  // "main" and Core throws: store path belongs to rc-oc; requested agent main.
+  const coreAgentId = route.agentId || "main";
+
   const botAwareSessionKey = `${route.sessionKey}:${params.accountId}:${params.event.senderId}`;
 
   const storePath = params.channelRuntime.session.resolveStorePath(params.cfg.session?.store, {
-    agentId: route.agentId,
+    agentId: coreAgentId,
   });
 
   const previousTimestamp = params.channelRuntime.session.readSessionUpdatedAt({
@@ -102,28 +55,25 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
 
   const bodyForAgent = buildBodyForAgent(params.event, params.groupHistory);
 
-  const { owner, ownerOnlySkills } = readAccountPolicy(params.cfg, params.accountId);
-  const guardrail = buildOwnerOnlyGuardrail(params.event.senderName, owner, ownerOnlySkills);
-  const bodyForAgentWithGuardrail = guardrail ? `${bodyForAgent}\n\n${guardrail}` : bodyForAgent;
-
   const body = params.channelRuntime.reply.formatAgentEnvelope({
     channel: "Rocket.Chat",
     from: buildConversationLabel(params.event),
     timestamp,
     previousTimestamp,
     envelope: envelopeOptions,
-    body: bodyForAgentWithGuardrail,
+    body: bodyForAgent,
   });
 
   const isCommand = params.event.text.startsWith("/");
   const ctxPayload = params.channelRuntime.reply.finalizeInboundContext({
     Body: body,
-    BodyForAgent: bodyForAgentWithGuardrail,
+    BodyForAgent: bodyForAgent,
     RawBody: params.event.text,
     CommandBody: params.event.text,
     From: buildSenderAddress(params.event),
     To: to,
     SessionKey: botAwareSessionKey,
+    AgentId: coreAgentId,
     AccountId: route.accountId ?? params.accountId,
     ChatType: params.event.roomType,
     ConversationLabel: buildConversationLabel(params.event),
@@ -140,7 +90,7 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     OriginatingChannel: "rocketchat",
     OriginatingTo: to,
     ...(isCommand ? { CommandSource: "text" as const, CommandAuthorized: true } : {}),
-    ...(await buildMediaContext(params.event.attachments, params.client)),
+    ...(await buildMediaContext(params.event.attachments, params.event.roomId, params.client)),
   });
 
   await params.channelRuntime.session.recordInboundSession({
@@ -212,6 +162,7 @@ function buildRecipientAddress(event: InboundEvent): string {
 
 async function buildMediaContext(
   attachments: InboundAttachment[],
+  roomId: string,
   client?: RocketChatClient,
 ): Promise<Record<string, unknown>> {
   if (attachments.length === 0) return {};
@@ -225,7 +176,12 @@ async function buildMediaContext(
             attachment.fileName ? { fileName: attachment.fileName } : undefined,
           );
           return { kind: "path" as const, value: filePath, mimeType: attachment.mimeType };
-        } catch {
+        } catch (error: any) {
+          if (client && roomId) {
+            client
+              .postMessage(roomId, `⚠️ ${error.message || "Failed to download attachment."}`)
+              .catch(() => {});
+          }
           return null;
         }
       }
@@ -241,21 +197,53 @@ async function buildMediaContext(
   const mediaUrls: string[] = [];
   const mediaPaths: string[] = [];
   const mediaTypes: string[] = [];
+  const attachmentPaths: string[] = [];
+  const attachmentUrls: string[] = [];
+  const attachmentContentTypes: string[] = [];
+  const attachmentDirs: string[] = [];
+  const attachmentIndexes: number[] = [];
 
+  let index = 0;
   for (const r of results) {
     if (!r) continue;
     if (r.kind === "path") {
       mediaPaths.push(r.value);
+      attachmentPaths.push(r.value);
+      attachmentDirs.push(dirname(r.value));
     } else {
       mediaUrls.push(r.value);
+      attachmentUrls.push(r.value);
     }
-    if (r.mimeType) mediaTypes.push(r.mimeType);
+    if (r.mimeType) {
+      mediaTypes.push(r.mimeType);
+      attachmentContentTypes.push(r.mimeType);
+    }
+    attachmentIndexes.push(index);
+    index += 1;
   }
 
   return {
     ...(mediaUrls.length > 0 ? { MediaUrl: mediaUrls[0], MediaUrls: mediaUrls } : {}),
     ...(mediaPaths.length > 0 ? { MediaPath: mediaPaths[0], MediaPaths: mediaPaths } : {}),
     ...(mediaTypes.length > 0 ? { MediaType: mediaTypes[0], MediaTypes: mediaTypes } : {}),
+    ...(attachmentUrls.length > 0
+      ? { AttachmentUrl: attachmentUrls[0], AttachmentUrls: attachmentUrls }
+      : {}),
+    ...(attachmentPaths.length > 0
+      ? { AttachmentPath: attachmentPaths[0], AttachmentPaths: attachmentPaths }
+      : {}),
+    ...(attachmentContentTypes.length > 0
+      ? {
+          AttachmentContentType: attachmentContentTypes[0],
+          AttachmentContentTypes: attachmentContentTypes,
+        }
+      : {}),
+    ...(attachmentDirs.length > 0
+      ? { AttachmentDir: attachmentDirs[0], AttachmentDirs: attachmentDirs }
+      : {}),
+    ...(attachmentIndexes.length > 0
+      ? { AttachmentIndex: attachmentIndexes[0], AttachmentIndexes: attachmentIndexes }
+      : {}),
   };
 }
 

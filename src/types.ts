@@ -1,5 +1,5 @@
 import type { PluginAccountConfig } from "./config/schema.js";
-export type { PluginConfig, PluginAccountConfig } from "./config/schema.js";
+export type { PluginAccountConfig } from "./config/schema.js";
 
 export type InboundAttachmentKind = "image" | "audio" | "document" | "video" | "unknown";
 
@@ -96,19 +96,19 @@ export type InboundEvent = {
 
 export type OpenClawConfigLike = OpenClawConfig;
 
-export type RoutePeer = {
+type RoutePeer = {
   kind: InboundEvent["roomType"];
   id: string;
 };
 
-export type ResolvedAgentRoute = {
+type ResolvedAgentRoute = {
   agentId: string;
   sessionKey: string;
   accountId?: string;
   mainSessionKey?: string;
 };
 
-export type FinalizedContext = Record<string, unknown> & {
+type FinalizedContext = Record<string, unknown> & {
   SessionKey?: string;
 };
 

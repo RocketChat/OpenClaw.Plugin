@@ -123,6 +123,33 @@ Plugin DDP Client
 | **Post**          | DDP: send typing stop signal; REST: post message          |
 | **Attachments**   | Download → upload via REST → attach reference             |
 
+### Inbound media context
+
+`buildMediaContext()` (`src/service/inbound.ts`) downloads inbound Rocket.Chat file
+attachments to temp paths (or keeps URLs) and exposes them to OpenClaw core media
+understanding. It emits **both** the legacy `Media*` fields and the newer
+`Attachment*` compatibility names, so all the following context keys are available:
+
+| Family        | Keys                                                                       |
+| ------------- | -------------------------------------------------------------------------- |
+| **Path**      | `MediaPath`/`MediaPaths`, `AttachmentPath`/`AttachmentPaths`               |
+| **URL**       | `MediaUrl`/`MediaUrls`, `AttachmentUrl`/`AttachmentUrls`                   |
+| **Type/MIME** | `MediaType`/`MediaTypes`, `AttachmentContentType`/`AttachmentContentTypes` |
+| **Directory** | `AttachmentDir`/`AttachmentDirs` (path dirname)                            |
+| **Index**     | `AttachmentIndex`/`AttachmentIndexes`                                      |
+
+Media understanding in core reads the `MediaPath`/`MediaUrls`/`MediaType` family
+via `normalizeAttachments()`; the `Attachment*` names are the current CLI-template
+tokens the docs reference.
+
+> **Why the audio CLI config uses `{{MediaPath}}`, not `{{AttachmentPath}}`**
+> For a `whisper-cli` audio CLI entry, core's `resolveCliMediaPath()` transcodes
+> non-WAV audio (e.g. Rocket.Chat `.ogg` voice notes) to a 16 kHz mono WAV and sets
+> that converted path as `templCtx.MediaPath`. `{{AttachmentPath}}` resolves to the
+> **original** (unconverted) file from the inbound context and would bypass that
+> transcode. Keep `{{MediaPath}}` in `tools.media.audio.models[].args` so
+> whisper-cli always receives the transcoded WAV.
+
 ## Commands
 
 Commands are parsed by `CommandParser.parse()` and route three ways:
@@ -234,6 +261,55 @@ Rocket.Chat Server
 - Different agents can handle different tasks
 - Access control per-bot
 - Scale horizontally (add more bots as needed)
+
+## Per-Agent (Per-Bot) Config
+
+### Location
+
+Agent-level config lives in two places:
+
+```
+~/.openclaw/
+│
+├─ openclaw.json                     # agents.list[] entries: per-agent model selection
+└─ agents/<agent-id>/
+   └─ agent/
+      └─ models.json                 # Per-agent provider/model catalog
+```
+
+### Structure
+
+Each entry in `agents.list[]` in `openclaw.json` can carry its own `model` selector:
+
+```json
+{
+  "agents": {
+    "list": [
+      {
+        "id": "rc-openclaw2nd",
+        "workspace": "/home/me/.openclaw/agents/rc-openclaw2nd",
+        "agentDir": "/home/me/.openclaw/agents/rc-openclaw2nd/agent",
+        "model": {
+          "primary": "nvidia-nim/claude-3-freecc-no-thinking/nvidia_nim/nvidia/nemotron-3-super-120b-a12b",
+          "fallbacks": ["openrouter/google/gemini-2.0-flash-thinking-exp:free", "ollama/mistral:7b"]
+        }
+      }
+    ]
+  }
+}
+```
+
+Field meanings:
+
+- `model.primary` — the provider/model ref used first for that agent's replies. Convention: `<provider>/<model-id>`.
+- `model.fallbacks` — ordered list of alternate provider/model refs tried automatically on overload, timeout, or availability errors. When a primary fails, OpenClaw walks this chain instead of surfacing the error.
+- Omit `model` to inherit `agents.defaults.model` (the global primary).
+
+Per-agent behavior is then resolved as:
+
+1. Agent's own `model` (if set) → overrides `agents.defaults.model`
+2. Each ref is a provider/model in `agents.defaults.models` or the agent's own catalog
+3. On failure, the runtime advances through `fallbacks` (log marker `model_fallback_decision`)
 
 ## Data Deduplication
 

@@ -92,14 +92,18 @@ Control how the agent responds.
 
 ## Tools & Skills
 
-| Command            | Description                           |
-| ------------------ | ------------------------------------- |
-| `!tools`           | List tools available to the agent     |
-| `!skills`          | List installed skills with usage info |
-| `!skill <name>`    | Run a specific skill                  |
-| `!skill cron`      | Show cron skill help                  |
-| `!skill email`     | Show email skill help                 |
-| `!skill configure` | Show setup status for skills          |
+| Command   | Description                                  |
+| --------- | -------------------------------------------- |
+| `!tools`  | List tools available to the agent            |
+| `!skills` | List installed skills (use via inbound chat) |
+
+### Owner-Only Skills
+
+Certain powerful skills (e.g. bash execution, file manipulation) are restricted strictly to the **Owner** of the bot for security reasons.
+
+- You must be listed in `openclaw.json` under `accounts.<id>.owner` (e.g., `"owner": "admin-user"`).
+- To use an owner-only skill, simply instruct the bot in your DM or a private channel where the bot is present.
+- Non-owner users who try to invoke owner-only skills will receive an unauthorized error from the bot.
 
 ## Cron Jobs
 
@@ -124,43 +128,6 @@ Schedule one-shot reminders or repeating tasks.
 !cron stop check disk space
 ```
 
-## Email
-
-Send, fetch, and summarize emails. Requires env vars — see [SETUP.md](SETUP.md#email-skills).
-
-| Command                                 | Description                          |
-| --------------------------------------- | ------------------------------------ |
-| `!email send <to> : <subject> : <body>` | Send an email                        |
-| `!email fetch <count> [account]`        | Fetch recent emails (max 100)        |
-| `!email summarize <count> [account]`    | Fetch + AI-summarize emails (max 10) |
-| `!email` or `!email help`               | Show email usage                     |
-
-**Examples:**
-
-```
-!email send alice@example.com : Meeting : Let's meet at 3pm
-!email fetch 5
-!email fetch 10 user@gmail.com
-!email summarize 5
-```
-
-**Requirements:**
-
-- **Send:** `AGENTMAIL_API_KEY` or `EMAIL_SMTP_USER` + `EMAIL_SMTP_PASS` env var
-- **Fetch:** `GMAIL_APP_PASSWORD` env var + `GMAIL_ACCOUNT` (or pass account as arg)
-
-See [SETUP.md](./SETUP.md) for full reference.
-
-## Configure
-
-Check skill setup status and get configuration steps.
-
-| Command      | Description                                             |
-| ------------ | ------------------------------------------------------- |
-| `!configure` | Show which skills are configured and how to set them up |
-
-Returns the status of email send/fetch and shows the env vars needed for each.
-
 ## Permission Model
 
 Commands are split into two tiers:
@@ -170,36 +137,9 @@ Commands are split into two tiers:
 | **Public** | Anyone in a room where the bot is present                               |
 | **Owner**  | Only the bot owner (set in `openclaw.json` under `accounts.<id>.owner`) |
 
-Owner-only commands: `add-bot`, `remove-bot`, `add-group`, `revoke`, `access`, `bots`, `email`, `configure`
+Owner-only commands: `add-bot`, `remove-bot`, `add-group`, `revoke`, `access`, `bots`
 
 Non-owners see a permission error when trying owner-only commands.
-
-### Owner-only skills (natural language)
-
-Beyond `!commands`, a lent/granted user can also ask the bot to perform actions in natural
-language (e.g. "send an email to ..."). To block owner-level skills from non-owners, each bot
-carries a guardrail instruction that tells the agent to refuse those skills unless the requester
-is the bot owner.
-
-Configure the list per account in `openclaw.json` under `channels.rocketchat.accounts.<id>`:
-
-```json
-{
-  "channels": {
-    "rocketchat": {
-      "accounts": {
-        "<bot-id>": {
-          "owner": "adminusername",
-          "ownerOnlySkills": ["email"]
-        }
-      }
-    }
-  }
-}
-```
-
-If `ownerOnlySkills` is omitted, it defaults to `["email"]`. The guardrail is injected only for
-non-owner senders with valid access; the owner's messages are unaffected.
 
 ## Unknown Command
 

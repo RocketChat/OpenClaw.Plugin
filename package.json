@@ -1,6 +1,6 @@
 {
   "name": "@dodaa08/openclaw-plugin-test",
-  "version": "1.2.10",
+  "version": "1.2.17",
   "description": "A fully unified plugin for integrating Rocket.Chat with OpenClaw. This plugin eliminates the need for an external bridging server, providing a direct, single-place architecture for inbounds, outbounds, session management, and CLI configuration.",
   "main": "dist/index.js",
   "peerDependencies": {
@@ -20,14 +20,15 @@
   },
   "type": "module",
   "scripts": {
-    "build": "rm -rf dist && npm run manifest && tsc && npm run bundle",
-    "bundle": "esbuild src/client/ddp.ts --bundle --format=esm --platform=node --outfile=dist/client/ddp.js --sourcemap",
+    "build": "rm -rf dist && npm run manifest && tsc && npm run bundle && chmod -R 755 dist && npm run format",
+    "bundle": "esbuild src/client/ddp.ts --bundle --format=esm --platform=node --outfile=dist/client/ddp.js --sourcemap --external:openclaw --external:@openclaw/*",
     "manifest": "tsx scripts/gen-manifest.mts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "start": "node dist/index.js",
-    "setup": "openclaw rocket-chat setup",
-    "test": "echo '✅ No tests yet'"
+    "setup": "openclaw rocketchat setup",
+    "test": "vitest run",
+    "test:integration": "vitest run tests/integration"
   },
   "repository": {
     "type": "git",
@@ -59,20 +60,21 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
-    "@types/ws": "^8.18.1",
     "esbuild": "^0.28.1",
     "openclaw": "^2026.7.1-2",
     "prettier": "^3.9.6",
     "tsx": "^4.22.4",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^2.0.0"
   },
   "dependencies": {
     "@clack/core": "1.4.3",
     "@rocket.chat/ddp-client": "^1.1.1",
     "@clack/prompts": "^1.7.0",
-    "commander": "^15.0.0",
+    "@rocket.chat/ddp-client": "^1.1.1",
     "json5": "^2.2.3",
     "picocolors": "^1.1.1",
+    "yaml": "^2.9.0",
     "zod": "^4.4.3"
   }
 }

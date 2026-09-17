@@ -11,12 +11,12 @@ import {
   sendMessage,
 } from "./admin-api.js";
 import {
-  addBinding,
   ensureAgentForBot,
   isAgentBound,
   readAllAccounts,
+  seedBotWorkspace,
   updateConfig,
-  type ExistingAccount,
+  bindAgentToAccount,
 } from "./config-updater.js";
 import { loadAdmin } from "./credentials.js";
 import { resolveAdminAuth } from "./auth.js";
@@ -313,6 +313,10 @@ export async function runSetup(): Promise<void> {
     // owner can be set later in openclaw.json
   }
 
+  if (agentResult.agentId === dedicatedId) {
+    seedBotWorkspace(accountId, ownerUsername);
+  }
+
   try {
     await withSpinner("Updating openclaw.json", async () => {
       updateConfig({
@@ -325,9 +329,14 @@ export async function runSetup(): Promise<void> {
         auth: { mode: "token", userId: botAuth.userId, accessToken: botAuth.authToken },
         replaceConnection: !serverAccounts || !serverAccounts.some((a) => a.serverUrl === rcUrl),
         ...(ownerUsername ? { owner: ownerUsername } : {}),
+        agentId: agentResult.agentId,
       });
+      if (agentResult.agentId) {
+        bindAgentToAccount(accountId, agentResult.agentId);
+      }
     });
     p.log.success(`Updated ${color.cyan(OC_CONFIG_PATH)}`);
+    p.log.success(`Bound @${botUsername} to agent '${agentResult.agentId}'`);
   } catch (e: unknown) {
     p.log.warn(`Config update skipped: ${e instanceof Error ? e.message : String(e)}`);
   }
@@ -343,12 +352,6 @@ export async function runSetup(): Promise<void> {
     );
   } else {
     p.log.success(`agent ${agentResult.agentId}`);
-  }
-  try {
-    addBinding({ channel: "rocketchat", accountId, agentId: agentResult.agentId });
-    p.log.success(`Bound @${botUsername} to agent '${agentResult.agentId}'`);
-  } catch (e: unknown) {
-    p.log.warn(`Could not create binding: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   const addToGroup = await promptConfirm({
