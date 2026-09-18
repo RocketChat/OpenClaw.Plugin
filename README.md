@@ -8,11 +8,14 @@ Connect your Rocket.Chat server directly to OpenClaw agents—no bridge server n
 [View on ClawHub](https://clawhub.ai/plugins/@dodaa08/openclaw-plugin-test)
 </div>
 
-## Prerequisites
+## Prerequisites & Cross-Platform Support
 
-- A Rocket.Chat server (with admin access)
-- OpenClaw installed and configured with an AI provider
-- A default agent already set up
+This plugin is fully cross-platform and runs on **Linux, macOS, and Windows**.
+
+- **Node.js**: `v22+`
+- **OpenClaw Core**: `v2026.7+`
+- **Rocket.Chat Server**: Any modern Rocket.Chat release (self-hosted or cloud) with admin access
+- **AI Provider**: OpenClaw configured with a primary AI provider & default agent (`main`)
 
 > **Having issues?** Check [`openclaw.examples.json`](./openclaw.examples.json) in the repo root for a complete annotated configuration reference. You can also manually edit `~/.openclaw/openclaw.json` if needed.
 
