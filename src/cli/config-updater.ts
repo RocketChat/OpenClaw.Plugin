@@ -27,9 +27,6 @@ export function getAgentWorkspaceDir(agentId: string): string {
   return resolve(SHARED_WORKSPACE_DIR, agentId);
 }
 
-// ensureSystemAgent was removed: agents.defaults.systemAgent is a legacy retired key
-// in OpenClaw 2026.9.x and causes "Unrecognized key" config validation errors.
-
 export type ExistingAccount = {
   accountId: string;
   serverUrl: string;
