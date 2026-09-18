@@ -4,9 +4,7 @@ How to install, configure, and manage credentials for the Rocket.Chat plugin.
 
 ## Prerequisites
 
-- Rocket.Chat server with admin access (needed once, during setup)
-- OpenClaw installed with AI provider configured
-- A default agent already set up
+See [Prerequisites & Cross-Platform Support](../README.md#prerequisites--cross-platform-support)
 
 ## Quick Start
 
