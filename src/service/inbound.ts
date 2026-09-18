@@ -32,10 +32,6 @@ export async function dispatchInboundEventWithChannelRuntime(params: {
     },
   });
 
-  // Core 2026.9+ SQLite stores are bound to a registered agent id (usually "main").
-  // Account `agentId` (e.g. rc-oc) is only a plugin label — it is not in agents.entries.
-  // Passing it into resolveStorePath opens an rc-* store, then dispatch still requests
-  // "main" and Core throws: store path belongs to rc-oc; requested agent main.
   const coreAgentId = route.agentId || "main";
 
   const botAwareSessionKey = `${route.sessionKey}:${params.accountId}:${params.event.senderId}`;
