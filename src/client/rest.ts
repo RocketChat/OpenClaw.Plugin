@@ -13,6 +13,7 @@ import { isPrivateOrLoopbackHost } from "openclaw/plugin-sdk/ssrf-runtime";
 
 const MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024;
 const ALLOWED_DOWNLOAD_MIME_PREFIXES = ["image/", "audio/", "video/", "application/"];
+const ALLOWED_DOWNLOAD_MIME_TYPES = new Set(["text/vcard", "text/x-vcard"]);
 
 import type {
   PluginAccountConfig,
@@ -192,7 +193,8 @@ export class RocketChatClient {
     const rawContentType = (contentTypeHeader ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
     if (
       !rawContentType ||
-      !ALLOWED_DOWNLOAD_MIME_PREFIXES.some((p) => rawContentType.startsWith(p))
+      (!ALLOWED_DOWNLOAD_MIME_PREFIXES.some((p) => rawContentType.startsWith(p)) &&
+        !ALLOWED_DOWNLOAD_MIME_TYPES.has(rawContentType))
     ) {
       throw new RocketChatClientError(
         `attachment download refused: unsupported content type "${contentTypeHeader ?? ""}"`,
