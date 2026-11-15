@@ -23,6 +23,8 @@ export class RocketChatDdpConnection {
   private subscription: ReturnType<DDPSDK["stream"]> | null = null;
   private stopped = false;
   private reconnectAttempts = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private generation = 0;
 
   constructor(options: RocketChatDdpConnectionOptions) {
     this.options = options;
@@ -59,57 +61,108 @@ export class RocketChatDdpConnection {
 
   stop(): void {
     this.stopped = true;
-    this.subscription?.stop();
-    this.sdk?.connection.close();
+    this.generation++;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    const subscription = this.subscription;
+    const sdk = this.sdk;
+    this.subscription = null;
     this.sdk = null;
+    subscription?.stop();
+    sdk?.timeoutControl.stop();
+    sdk?.connection.close();
   }
 
   private async connect(): Promise<void> {
     if (this.stopped) return;
+    if (this.reconnectTimer !== null) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     const maxReconnects = this.options.maxReconnects ?? DEFAULT_MAX_RECONNECTS;
+    const reconnectDelayMs = this.options.reconnectDelayMs ?? 2_000;
+    const generation = ++this.generation;
+    const isGenerationCurrent = () => !this.stopped && this.generation === generation;
+
+    const previousSubscription = this.subscription;
+    const previousSdk = this.sdk;
+    this.subscription = null;
+    this.sdk = null;
+    previousSubscription?.stop();
+    previousSdk?.timeoutControl.stop();
+    previousSdk?.connection.close();
+
     this.options.onStatus?.("connecting");
+    if (!isGenerationCurrent()) return;
+
+    let currentSdk: DDPSDK | null = null;
+    const isCurrent = () => isGenerationCurrent() && currentSdk !== null && this.sdk === currentSdk;
 
     try {
       const sdk = DDPSDK.create(this.options.wsUrl, {
         retryCount: maxReconnects,
-        retryTime: this.options.reconnectDelayMs ?? 2_000,
+        retryTime: reconnectDelayMs,
       });
+      currentSdk = sdk;
       this.sdk = sdk;
+      this.reconnectAttempts = 0;
 
-      sdk.connection.on("connecting", () => this.options.onStatus?.("connecting"));
-      sdk.connection.on("connected", () => {
-        this.reconnectAttempts = 0;
-        this.options.onStatus?.("connected");
-      });
-      sdk.connection.on("close", () => {
-        this.options.onStatus?.("closed");
-        if (!this.stopped) {
-          this.reconnectAttempts++;
-          if (this.reconnectAttempts > maxReconnects) {
+      const scheduleReconnect = () => {
+        if (!isCurrent() || this.reconnectTimer !== null) return;
+        this.reconnectTimer = setTimeout(() => {
+          this.reconnectTimer = null;
+          if (isCurrent()) void this.connect();
+        }, reconnectDelayMs);
+      };
+
+      sdk.connection.on("connection", (status) => {
+        if (!isCurrent()) return;
+
+        switch (status) {
+          case "connecting":
+          case "reconnecting":
+            this.options.onStatus?.("connecting");
+            break;
+          case "connected":
+            this.reconnectAttempts = 0;
+            this.options.onStatus?.("connected");
+            break;
+          case "disconnected":
+            this.options.onStatus?.("closed");
+            this.reconnectAttempts++;
+            if (this.reconnectAttempts > maxReconnects) scheduleReconnect();
+            break;
+          case "closed":
+            this.options.onStatus?.("closed");
+            scheduleReconnect();
+            break;
+          case "failed":
             this.options.onStatus?.("failed");
-            this.options.onError?.(
-              new Error(
-                `Max reconnect attempts (${maxReconnects}) exceeded for ${this.options.wsUrl}`,
-              ),
-            );
-            return;
-          }
-          this.connect();
+            break;
+          case "idle":
+            break;
         }
       });
 
       await sdk.connection.connect();
+      if (!isCurrent()) return;
 
       await sdk.account.loginWithToken(this.options.authToken);
+      if (!isCurrent()) return;
 
       const sub = sdk.stream("room-messages", "__my_messages__", (...args: unknown[]) => {
+        if (!isCurrent()) return;
         const message = args[0] as RocketChatMessageRecord | undefined;
         if (message) this.options.onMessage(message);
       });
       this.subscription = sub;
       await sub.ready();
+      if (!isCurrent()) return;
       this.options.onStatus?.("ready");
     } catch (err) {
+      if (!isGenerationCurrent()) return;
       this.options.onError?.(err instanceof Error ? err : new Error(String(err)));
     }
   }
